@@ -1,0 +1,458 @@
+---
+title: "Goldencheetah Import"
+author: "Rigler Andreas"
+date: "14 9 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(osmdata)
+library(ggmap)
+library("jsonlite")
+#library(OpenStreetMap)
+library(plotly)
+library(lubridate)
+```
+
+
+```{r Wattwerte Grenzen}
+
+mmol_2 <- 200
+ftp <- 260
+watt_z1 <- c(80:(mmol_2-1))
+watt_z2 <- c(mmol_2:(ftp*1.1))
+watt_z3 <- c(((ftp*1.1)+1):1100)
+
+```
+
+Pfad definieren:
+```{r}
+
+pfad_aktivity <- "C:/Users/rigle/AppData/Local/GoldenCheetah/Andl/activities/" 
+
+
+```
+
+Liste der json files:
+
+```{r}
+files <- list.files(pfad_aktivity)
+
+
+files <- tibble(file_name = files)
+
+files <- files %>% mutate(file_date = str_sub(file_name,1,10),
+                          file_year = str_sub(file_name,1,4))
+files
+summary(files)
+```
+
+
+## Select files by date
+```{r}
+start_date <- "2021-09-10"
+end_date <- "2022-01-01"
+
+
+#files_select <- files[1400:1420]
+
+
+
+date_selected <- tibble(file_date = seq.Date(as.Date(start_date),
+                                             as.Date(end_date), 
+                                             by = "day") )
+date_selected <- date_selected %>% mutate(file_date = str_replace_all(as.character(file_date),"-","_"))
+
+files_selected <- files  %>% right_join(date_selected, 
+                             by= "file_date") %>% 
+                  filter(!is.na(file_name)) %>% #if the date doesn`t exist in the data
+                  select(file_name) %>% pull()
+
+
+
+
+files_selected
+
+```
+
+## Select files per year
+
+```{r}
+year_selected <- c("2021")
+
+files_selected <- files %>% filter(file_year %in% year_selected)
+```
+
+
+
+```{r mehrere files}
+
+data_ride <- list()
+data_rides <- list()
+for (i in seq_along(files_selected$file_name)) {
+  print(i)
+  datei <- str_c(pfad_aktivity,files_selected$file_name[i])
+  try({
+     data_ride <- read_json(datei)
+     
+            #sind trainingsdaten vorhanden ?
+            samples <- sum(names(data_ride[[1]]) == "SAMPLES")
+            
+            if (samples == 1) {
+     
+                ridedata_list <- data_ride[[1]]$SAMPLES
+                ridedata <- bind_rows(ridedata_list)
+                ridedata <- ridedata %>% mutate(sec = SECS- lag(SECS),
+                                                type = "ohne Daten")
+              
+            }
+  
+               
+            ridedata <- ridedata %>% mutate(workout = data_ride[[1]]$TAGS$`Workout Code`,
+                                            time_start = data_ride[[1]]$STARTTIME,
+                                            date = as.Date(time_start), 
+                                            year =year(date)  ,
+                                            month= month(date),
+                                            week = week(date),
+                                            time_start = as.POSIXct(time_start),
+                                            #beschreibung = data_ride[[1]]$TAGS$Objective, #braucht viel speicher?
+                                            cp = data_ride[[1]]$TAGS$CP,
+                                            rad = data_ride[[1]]$TAGS$Rad)
+            #WATTS enthalten?
+            watt <- sum(names(ridedata) == "WATTS")
+            
+            if (watt == 1) {
+              
+              ridedata <- ridedata %>% mutate(zone = if_else(WATTS %in% watt_z1,
+                                                "Z1",
+                                                if_else(WATTS %in% watt_z2, 
+                                                        "Z2", 
+                                                        if_else(WATTS %in% watt_z3,
+                                                                "Z3",
+                                                                "easy"))),
+                                              type = "Zonen")
+            }else{
+              ridedata <- ridedata %>% mutate(type = "keine Watt")
+            }
+            
+            
+      data_rides[[i]] <-  ridedata
+    }) #try ENDE
+}
+
+ridedata <- bind_rows(data_rides)
+
+#save the data:
+ridedata %>% write_rds(str_c("./Results/trainingsdata_",year_selected,".rds"))
+#ridedata <- read_rds(str_c("./Results/trainingsdata_",year_selected,".rds"))
+
+```
+
+
+# Analyse
+```{r}
+ridedata %>% filter(type == "Zonen") %>% group_by(month,zone,rad, time_start) %>% summarise(km=max(KM),
+                                    hr = mean(HR),
+                                    watt = mean(WATTS),
+                                    zeit = sum(sec,na.rm = TRUE)) %>%
+  group_by(month, zone) %>% summarise(km = sum(km),
+                                    hr = mean(hr),
+                                    watt = mean(watt),
+                                    zeit = sum(zeit,na.rm = TRUE)/3600) %>%
+  ggplot(aes(x=month))+
+  geom_point(aes(y=zeit, color=as.factor(zone)))#+
+  geom_point(aes(y=hr, color = "HR"))
+```
+
+
+```{r}
+#write_rds(ridedata,"test_mit_beschreibung.rds")
+
+#ridedata <- read_rds("test_mit_beschreibung.rds")
+```
+
+```{r}
+ridedata %>% group_by(week,rad,time_start, date) %>% summarise(km=max(KM),
+                                    hr = mean(HR),
+                                    watt = mean(WATTS)) %>%
+  group_by(date) %>% 
+      summarise(km = sum(km)) %>% 
+        arrange(date) %>%
+          mutate(km_cum = cumsum(km)) %>%
+  ggplot(aes(x=date))+
+  geom_line(aes(y= km_cum))
+```
+
+```{r}
+ridedata %>% group_by(week,rad,time_start, date) %>% summarise(km=max(KM),
+                                    hr = mean(HR),
+                                    watt = mean(WATTS)) %>%
+  group_by(date) %>% 
+      summarise(km = sum(km)) %>% 
+        arrange(date) %>%
+          mutate(km_cum = cumsum(km)) %>%
+  ggplot(aes(x=date))+
+  geom_line(aes(y= km_cum))
+```
+
+
+
+```{r}
+ridedata %>% group_by(week,rad,time_start, date) %>% summarise(km=max(KM),
+                                    hr = mean(HR),
+                                    watt = mean(WATTS)) %>%
+  group_by(rad,date) %>% 
+      summarise(km = sum(km)) %>% 
+  
+        arrange(date) %>%
+          mutate(km_cum = cumsum(km)) %>% #filter(rad=="P2Cros ")
+  ggplot(aes(x=date))+
+  geom_line(aes(y= km_cum, color = rad))
+```
+
+
+
+
+```{r}
+ridedata %>% group_by(week,rad,time_start, date) %>% summarise(km=max(KM),
+                                    hr = mean(HR),
+                                    watt = mean(WATTS)) %>%
+  group_by(date) %>% 
+      summarise(hr = mean(hr),
+                watt = mean(watt)) %>% 
+  ggplot(aes(x=date))+
+  geom_line(aes(y= hr, color ="hr"))+
+  geom_line(aes(y=watt, color = "watt"))
+```
+
+
+
+```{r}
+ridedata %>% group_by(week,zone,rad, time_start) %>% summarise(km=max(KM),
+                                    hr = mean(HR),
+                                    watt = mean(WATTS)) %>%
+  group_by(week, zone) %>% summarise(km = sum(km),
+                                    hr = mean(hr),
+                                    watt = mean(watt)) %>%
+  ggplot(aes(x=hr))+
+  geom_point(aes(y=watt, color=as.factor(week)))+
+  geom_point(aes(y=hr, color = "HR"))+
+  facet_grid(zone~.)
+
+```
+
+```{r}
+ridedata  %>% group_by(month,rad, time_start) %>% summarise(km=max(KM),
+                                    hr = mean(HR),
+                                    watt = mean(WATTS)) %>%
+  group_by(month) %>% summarise(km = sum(km),
+                                    hr = mean(hr),
+                                    watt = mean(watt)) %>%
+  ggplot(aes(x=watt))+
+  #geom_point(aes(y=watt, color="watt"))+
+  geom_point(aes(y=hr, color = as.factor(month)))
+
+```
+
+
+```{r}
+ridedata %>% glimpse()
+ ridedata %>% summary()
+
+```
+
+```{r}
+ridedata %>% mutate(date = as.Date(time_start), 
+                    year =year(date)  ,
+                    month= month(date),
+                    week = week(date),
+                    time_start = as.POSIXct(time_start)) %>% 
+  select(time_start, date, year, month, week)
+```
+
+
+
+```{r}
+datei_info <- gc_data[[1]][[6]]
+datei_info$`Workout Code`
+datei_info$Objective
+```
+
+```{r}
+
+#MEtriken Änderung:
+data4[[1]][[5]]
+```
+
+```{r}
+#Intervalle
+data4[[1]][[7]]
+```
+
+```{r}
+
+ridedata_list <- gc_data[[1]][[8]]
+ridedata <- bind_rows(ridedata_list)
+
+```
+
+```{r}
+ridedata %>% ggplot(aes(x=SECS))+
+  geom_point(aes(y=WATTS, color = "Watt"))+
+  labs(title = datei_info$`Workout Code`)
+
+```
+## Mehrere Dateien Watt auslesen
+
+```{r}
+files <- list.files(pfad_aktivity)
+summary(files)
+```
+
+```{r mehrere files}
+files_select <- files[1300:1420]
+
+data_ride <- list()
+data_rides <- list()
+for (i in seq_along(files_select)) {
+  datei <- str_c(pfad_aktivity,files_select[i])
+   data_ride <- read_json(datei)
+          ridedata_list <- data_ride[[1]]$SAMPLES
+          ridedata <- bind_rows(ridedata_list)
+   
+          ridedata <- ridedata %>% mutate(workout = data_ride[[1]]$TAGS$`Workout Code`,
+                                          time_start = data_ride[[1]]$STARTTIME,
+                                          beschreibung = data_ride[[1]]$TAGS$Objective,
+                                          cp = data_ride[[1]]$TAGS$CP,
+                                          rad = data_ride[[1]]$TAGS$Rad)
+    data_rides[[i]] <-  ridedata
+
+}
+
+ridedata <- bind_rows(data_rides)
+
+data_ride[[1]]$DEVICETYPE
+```
+
+```{r}
+ridedata %>% group_by(rad) %>% summarise(max(WATTS))
+```
+
+
+
+```{r}
+
+### Karte
+ridedata %>% filter(LAT > 40 ) %>% ggplot( aes(LON, LAT)) + 
+  geom_point(aes(color= WATTS),size = .25, show.legend = FALSE) +
+  coord_quickmap()#coord_sf()
+
+
+```
+
+```{r osmdata}
+
+#https://dominicroye.github.io/en/2018/accessing-openstreetmap-data-with-r/
+q <- getbb("Madrid") %>%
+      opq() %>%
+       add_osm_feature("amenity", "cinema")
+
+str(q)
+
+cinema <- osmdata_sf(q)
+cinema
+
+#our background map
+mad_map <- get_map(getbb("niederoesterreich"), maptype = "toner-background")
+
+ggmap(mad_map)
+?get_map
+?getbb
+
+test <- ridedata %>% filter(LAT > 40 ) 
+
+background <- get_map(location = c(14.6,48))
+ggmap(mad_map)
+ggmap(mad_map) + geom_point(data = test,aes(x=LON,y=LAT)) #+  coord_cartesian(xlim=c(14.5,15))
+
+mapi <- openmap(c(lat= 14.5,   lon= 14.7),
+			c(lat= 47,   lon= 49), minNumTiles=9)#, type ="maptoolkit-topo") 
+  
+?openmap
+
+```
+
+
+
+```{r}
+files <- list.files(pfad_aktivity)
+```
+
+```{r}
+selected_files <- files[1400:1411]
+gc_data_list <- list()
+ridedata <- list()
+for (i in seq_along(selected_files)) {
+
+  gc_data <- read_json(str_c(pfad_aktivity, selected_files[i]))
+  ridedata_list <- gc_data[[1]][[8]]
+  ridedata[[i]] <- bind_rows(ridedata_list)
+
+}
+
+test <- bind_rows(ridedata)
+```
+
+```{r}
+### Karte
+test %>% filter(LAT > 2) %>% ggplot( aes(LON, LAT)) + 
+  geom_point(aes(color= WATTS),size = .25, show.legend = FALSE) +
+  coord_quickmap()#coord_sf()
+
+```
+
+```{r}
+heat <- test %>% filter(LAT >47.96 &
+                          LAT < 47.968 &
+                          LON > 14.76 &
+                          LON < 14.79) %>% 
+  group_by(LAT,LON) %>% count
+```
+
+```{r}
+plot1 <-heat %>% filter(LAT > 2) %>% ggplot( aes(LON, LAT)) + 
+  geom_point(aes(color= n),size = .25, show.legend = FALSE)+
+  scale_color_gradient(low = "blue", high = "red")  #+coord_quickmap()#coord_sf()
+
+ggplotly(plot1)
+```
+
+```{r}
+require(maps)
+require(ggplot2)
+
+mp <- openmap(c(53.38332836757155,-130.517578125),
+		c(15.792253570362446,-67.939453125),4,'stamen-watercolor')
+mp_bing <- openmap(c(53.38332836757155,-130.517578125),
+		c(15.792253570362446,-67.939453125),4,'bing')
+states_map <- map_data("state")
+states_map_merc <- as.data.frame(
+		projectMercator(states_map$lat,states_map$long))
+states_map_merc$region <- states_map$region
+states_map_merc$group <- states_map$group
+crimes <- data.frame(state = tolower(rownames(USArrests)), USArrests)
+
+p <- autoplot(mp,expand=FALSE) + geom_polygon(aes(x=x,y=y,group=group),
+		data=states_map_merc,fill="black",colour="black",alpha=.1) + theme_bw()
+print(p)
+p <- autoplot(mp_bing) + geom_map(aes(x=-10000000,y=4000000,map_id=state,fill=Murder),
+		data=crimes,map=states_map_merc)
+print(p)
+
+```
+
