@@ -1,0 +1,52 @@
+---
+title: "FTP Verlauf"
+author: "ari"
+date: "12 10 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+ftp_data_raw <- read_csv2("./Data/FTP.csv")
+```
+
+```{r}
+ftp_data <- ftp_data_raw %>% mutate(date = as.Date(datum, "%d.%m.%Y"))
+```
+
+
+```{r}
+year_fill <- ftp_data %>% select(date,ftp) %>% mutate(year = year(date),
+                                     min_date = min(date,na.rm = TRUE)) %>%
+                          group_by(year) %>% 
+                                summarise( #date_min = if_else(year == year(min_date), min_date, max(date)),
+                                          xmin = as.Date(str_c(year,"-01-01")),
+                                          xmax = as.Date(str_c(year,"-12-31")),
+                                          ymin = min(ftp)-10,
+                                          ymax = max(ftp)+10
+                                          ) %>% distinct()
+```
+
+
+```{r}
+ftp_data %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=ftp, color = Methode), size =3)+
+  geom_line(aes(y=ftp))+
+  geom_rect(data=year_fill, inherit.aes=FALSE,aes(xmin=xmin,xmax=xmax,ymin=ymin,ymax=ymax),fill = year_fill$year, alpha=0.2)+
+  theme_minimal()+
+  scale_x_date(date_labels = "%Y %b", date_breaks = "6 month")+
+  theme(axis.text.x = element_text(angle = 90),
+        )
+  #coord_cartesian(aes(xlim=min(ftp_data$date), 
+    
+  
+```
+
