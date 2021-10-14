@@ -1,0 +1,238 @@
+---
+title: "Laktat Auswertung"
+author: "ari"
+date: "24 1 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+#library(gapminder)
+library(lubridate)
+library(modelr)
+```
+
+
+## Einlesen
+
+```{r}
+ftp_laktat <- 5  #bei wieviel mmol ca FTP - bei mir sind es ziemlich genau 5mmol
+```
+
+
+```{r einlesen und bearbeiten}
+
+
+data <- read_excel("./Data/Laktat.xls")
+
+data <- data %>% rename(watt = Watt,
+                        laktat = Laktat,
+                        datum = Datum,
+                        person = Person,
+                        inervall_dauer = Intervalllänge)
+
+
+data <- data %>% mutate(year =year(datum),
+                           month=month(datum))
+```
+
+## Übersicht
+
+```{r Plot Jahresübersicht}
+data %>% ggplot(aes(x=watt,color=as.factor(datum)))+
+  geom_point(aes(y=laktat))+
+  geom_line(aes(y=laktat,linetype = as.factor(year)))
+
+data %>% #filter(month %in% c(5,6))  %>% 
+  ggplot(aes(x=watt,color=as.factor(datum)))+
+  geom_point(aes(y=laktat))+
+  geom_line(aes(y=laktat))+
+  geom_hline(yintercept = 2)+
+  facet_wrap(year~.)
+```
+
+```{r}
+data %>% filter(laktat <= 2) %>% 
+                    group_by(datum) %>%
+                      summarise(watt = max(watt)) %>%
+  ggplot(aes(x=datum))+
+     geom_point(aes(y=watt))
+              
+```
+
+
+## FTP Berechnung
+
+```{r Funtkion}
+ftp_berechnung <- function(data_raw, datum_selected){
+  datum_selected <- as.Date(datum_selected)
+  data_raw <- data_raw %>% filter(datum == datum_selected) #year == jahr & month == monat)
+
+#fehlmessungen filter: (laktat muss steigen)
+ data_raw <- data_raw %>% mutate(ungueltig = laktat-lag(laktat, 
+                                                default =0)) %>% 
+   filter(ungueltig >0) %>% select(-ungueltig)
+ 
+  data_gemessen <- data_raw
+ 
+ model <- lm(laktat~(watt*watt),data=data_raw)#as.list(test) %>% 
+#model_laktat <- nls(laktat~a*exp(b*watt),data = data_raw,start = list(a=0.01,b=0.01))
+model_laktat <- nls(watt~a*log(b*laktat),data = data_raw,start = list(a=10,b=1))
+
+data_raw %>% data_grid(watt = seq_range(watt,30)) %>%
+  add_predictions(model,"laktat") %>%
+  ggplot(aes(x=watt,y=laktat))+geom_point()+
+  geom_point(data=data_raw,aes(color="original"))
+
+laktat_prediction <- data_raw %>% data_grid(laktat = seq_range(laktat,50)) %>%
+  add_predictions(model_laktat,"watt") 
+
+w_5m <- laktat_prediction %>% filter(laktat >4.9 & 
+                                     laktat < 5.1) %>% 
+            summarise(w_5m = mean(watt)) %>% round(digits=1)
+w_2m <- laktat_prediction %>% filter(laktat >1.9 & 
+                                       laktat < 2.1) %>% 
+  summarise(w_2m = mean(watt)) %>% round(digits=1)
+
+laktat_result <- data_gemessen %>% mutate(gemessen = TRUE) %>%
+                    select(laktat,watt,gemessen) %>%
+                                  bind_rows(laktat_prediction) %>%
+                    mutate(datum = datum_selected)
+
+result <-  list(data = laktat_result,#laktat_prediction,
+      w_5m = w_5m,
+      w_2m = w_2m)
+
+return(result)
+}
+
+```
+
+```{r}
+
+date_selected <- c("2021-01-28", "2021-01-03","2020-02-04","2019-02-09","2021-02-23", "2021-10-14")
+
+d <-list()
+for (i in seq_along(date_selected)) {
+d[i] <-  ftp_berechnung(data, date_selected[i])
+}
+
+
+laktat_selected <- bind_rows(d)  %>% 
+                      mutate(datum = as.factor(datum))
+
+laktat_selected%>%
+  ggplot(aes(x=watt, color = datum))+
+  geom_point(aes(y=laktat))+
+  geom_point(data = laktat_selected %>% filter(gemessen==TRUE),aes(y=laktat,), size = 4)+
+  geom_hline(yintercept = 2)
+```
+
+
+```{r}
+#jahr <- 2020
+#monat <- 1
+
+datum_selected <- as.Date("2021-10-14")
+```
+
+
+
+```{r}
+test <- data %>% filter(datum == datum_selected) #year == jahr & month == monat)
+
+#fehlmessungen filter: (laktat muss steigen)
+ test <- test %>% mutate(ungueltig = laktat-lag(laktat, 
+                                                default =0)) %>% 
+   filter(ungueltig >0) %>% select(-ungueltig)
+ 
+
+```
+
+
+```{r}
+model <- lm(laktat~(watt*watt),data=test)#as.list(test) %>% 
+model_laktat <- nls(laktat~a*exp(b*watt),data = test,start = list(a=0.01,b=0.01))
+model_laktat <- nls(watt~a*log(b*laktat),data = test,start = list(a=10,b=1))
+
+test %>% data_grid(watt = seq_range(watt,30)) %>%
+  add_predictions(model,"laktat") %>%
+  ggplot(aes(x=watt,y=laktat))+geom_point()+
+  geom_point(data=test,aes(color="original"))
+
+laktat_prediction <- test %>% data_grid(laktat = seq_range(laktat,50)) %>%
+  add_predictions(model_laktat,"watt") 
+
+w_5m <- laktat_prediction %>% filter(laktat >4.9 & 
+                                     laktat < 5.1) %>% 
+            summarise(mean(watt)) %>% round(digits=1)
+w_2m <- laktat_prediction %>% filter(laktat >1.9 & 
+                                       laktat < 2.1) %>% 
+  summarise(mean(watt)) %>% round(digits=1)
+
+#jahr <- test[1,"year"]
+#monat <- test[1,"month"]
+
+laktat_prediction %>%
+  ggplot(aes(x=watt,y=laktat))+geom_point()+
+  geom_point(data=test,aes(color="Messung"))+
+   labs(title =str_c("Laktattest ", datum_selected ,":    ", w_5m, "W bei 5mmol (~FTP)"),
+       subtitle = str_c(w_2m, "W bei 2mmol"),
+       y= "Laktat [mmol]",
+       x= "Watt [W]",
+       color="")
+
+  #labs(title =str_c("Laktattest ", jahr ,"-", monat, ":    ", w_5m, "W bei 5mmol (~FTP)"),
+ 
+
+ggsave("Results/Laktatkurve_", datum_selected,".png")
+
+```
+
+
+
+# NEXT
+predict all curves -- next to 2mmol --> over date --> pattern?
+
+
+
+
+
+
+```{r}
+data_4m = data %>% filter(laktat <= ftp_laktat) %>% 
+  group_by(datum) %>% 
+  summarise(laktat_4m = max(laktat))
+
+data_4p = data %>% filter(laktat > ftp_laktat) %>% 
+  group_by(datum) %>% 
+  summarise(laktat_4p = min(laktat))
+
+data <- left_join(data,data_4m, by= c("datum"))
+
+data <- left_join(data,data_4p, by= c("datum"))
+
+data %>% filter(laktat == laktat_4p |
+                laktat == laktat_4m) %>% 
+  mutate(laktat_diff = laktat - lag(laktat),
+         watt_diff = watt - lag(watt),
+         l4_diff = ftp_laktat -lag(laktat),
+         watt_4 = lag(watt) + (watt_diff / laktat_diff) * l4_diff,
+         watt_lag = lag(watt),
+         laktat_lag = lag(laktat)) %>% 
+  select(datum, watt, laktat_diff,laktat,
+         l4_diff, watt_4, watt_lag, laktat_lag) %>%
+  filter(laktat_diff >= 0)
+
+
+```
+```{r}
+result %>% ggplot(aes(x=datum))+
+  geom_point(aes(y =watt))
+```
+
