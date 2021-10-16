@@ -27,8 +27,9 @@ ftp_laktat <- 5  #bei wieviel mmol ca FTP - bei mir sind es ziemlich genau 5mmol
 
 ```{r einlesen und bearbeiten}
 
+path_laktat <- "C:/Users/rigle/Documents/Training/Laktat/"
 
-data <- read_excel("./Data/Laktat.xls")
+data <- read_excel(str_c(path_laktat,"Laktat.xls"))
 
 data <- data %>% rename(watt = Watt,
                         laktat = Laktat,
@@ -40,6 +41,10 @@ data <- data %>% rename(watt = Watt,
 data <- data %>% mutate(year =year(datum),
                            month=month(datum))
 ```
+
+
+
+
 
 ## Übersicht
 
@@ -109,6 +114,71 @@ result <-  list(data = laktat_result,#laktat_prediction,
       w_2m = w_2m)
 
 return(result)
+}
+
+
+
+
+###---------------------------calculation of 2mmol Watt
+### with nonlineare regression model
+
+watt_2mmol <- function(d){
+
+  result <-tibble()
+#fehlmessungen filter: (laktat muss steigen)
+ d <- d %>% arrange(watt) %>% mutate(ungueltig = laktat-lag(laktat, 
+                                                default =0)) %>% 
+   filter(ungueltig >0) %>% select(-ungueltig)
+ 
+ model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=1))
+ 
+ laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
+  add_predictions(model_laktat,"watt") 
+ date <- d %>% summarise(mean(datum)) %>% pull()
+ watt <- laktat_prediction %>% filter(laktat <= 2) %>% summarise(watt = max(watt)) %>% pull()
+ 
+ result <- tibble("date" = date,
+                  "watt" = watt)
+ return(result)
+}
+```
+
+
+### Hier WEITERMACHEN:
+```{r}
+
+d<- data %>% filter(datum == as.Date("2018-06-25"))
+ d <- d %>% arrange(watt) %>% mutate(ungueltig = laktat-lag(laktat, 
+                                                default =0)) %>% 
+   filter(ungueltig >0) %>% select(-ungueltig)
+ 
+ model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=0.1,b=0.1))
+ nls(laktat~a*exp(b*watt),data = d,start = list(a=0.01,b=0.01))
+ 
+ # das log model ist das bessere, geht aber nicht immer:
+ # - wie das ergebnis mit exp model ? - try() in function einbauen
+```
+
+
+```{r Funtkion}
+watt_xmmol <- function(d,x){
+
+  result <-tibble()
+#fehlmessungen filter: (laktat muss steigen)
+ d <- d %>% arrange(watt) %>% mutate(ungueltig = laktat-lag(laktat, 
+                                                default =0)) %>% 
+   filter(ungueltig >0) %>% select(-ungueltig)
+ 
+ model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=1))
+ 
+ laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
+  add_predictions(model_laktat,"watt") 
+ date <- d %>% summarise(mean(datum)) %>% pull()
+ watt <- laktat_prediction %>% filter(laktat <= x) %>% summarise(watt = max(watt)) %>% pull()
+ 
+ result <- tibble("date" = date,
+                  "watt" = watt)
+ return(result)
 }
 
 ```
@@ -196,11 +266,43 @@ ggsave("Results/Laktatkurve_", datum_selected,".png")
 
 
 
-# NEXT
-predict all curves -- next to 2mmol --> over date --> pattern?
+### 2mmol Progress
+
+
+```{r}
+
+data_selected <- data %>% filter(datum == datum_selected) #year == jahr & month == monat)
 
 
 
+
+
+a = watt_2mmol(data_selected)
+a
+
+date_list <- data %>% distinct(datum)
+
+laktat_2mmol_list <- list()
+for (i in seq_along(date_list$datum)) {
+  
+  date_selected <- date_list[i,] %>% pull()
+  data_selected <- data %>% filter(datum == date_selected)
+  
+  try(laktat_2mmol_list[[i]] <- watt_2mmol(data_selected))
+  
+  laktat_2mmol_list[[i]]$i <- i
+  laktat_2mmol_list[[i]]$date <- date_selected
+  #print(date_list[i,])
+}
+
+date_list[i,]
+i
+bind_rows(laktat_2mmol_list) %>% mutate(watt = if_else(is.na(watt), 100, watt),
+                                        fehlender_wert = if_else(watt == 100, TRUE, FALSE)) %>%
+    ggplot(aes(x=date))+
+    geom_point(aes(y=watt, color = fehlender_wert))+
+    geom_line(aes(y=watt, color = fehlender_wert))
+```
 
 
 
@@ -231,6 +333,7 @@ data %>% filter(laktat == laktat_4p |
 
 
 ```
+
 ```{r}
 result %>% ggplot(aes(x=datum))+
   geom_point(aes(y =watt))
