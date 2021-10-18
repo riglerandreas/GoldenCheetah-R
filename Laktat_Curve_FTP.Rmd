@@ -71,7 +71,7 @@ data %>% filter(laktat <= 2) %>%
 ```
 
 
-## FTP Berechnung
+## Functions
 
 ```{r Funtkion}
 ftp_berechnung <- function(data_raw, datum_selected){
@@ -115,10 +115,11 @@ result <-  list(data = laktat_result,#laktat_prediction,
 
 return(result)
 }
+```
 
 
 
-
+```{r }
 ###---------------------------calculation of 2mmol Watt
 ### with nonlineare regression model
 
@@ -132,35 +133,21 @@ watt_2mmol <- function(d){
  
  model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=1))
  
+ 
+ 
  laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
   add_predictions(model_laktat,"watt") 
  date <- d %>% summarise(mean(datum)) %>% pull()
  watt <- laktat_prediction %>% filter(laktat <= 2) %>% summarise(watt = max(watt)) %>% pull()
  
  result <- tibble("date" = date,
-                  "watt" = watt)
+                  "watt_2mmol" = watt)
  return(result)
 }
 ```
 
 
-### Hier WEITERMACHEN:
-```{r}
-
-d<- data %>% filter(datum == as.Date("2018-06-25"))
- d <- d %>% arrange(watt) %>% mutate(ungueltig = laktat-lag(laktat, 
-                                                default =0)) %>% 
-   filter(ungueltig >0) %>% select(-ungueltig)
- 
- model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=0.1,b=0.1))
- nls(laktat~a*exp(b*watt),data = d,start = list(a=0.01,b=0.01))
- 
- # das log model ist das bessere, geht aber nicht immer:
- # - wie das ergebnis mit exp model ? - try() in function einbauen
-```
-
-
-```{r Funtkion}
+```{r xmmol}
 watt_xmmol <- function(d,x){
 
   result <-tibble()
@@ -171,18 +158,64 @@ watt_xmmol <- function(d,x){
  
  model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=1))
  
+ 
+ 
  laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
   add_predictions(model_laktat,"watt") 
  date <- d %>% summarise(mean(datum)) %>% pull()
  watt <- laktat_prediction %>% filter(laktat <= x) %>% summarise(watt = max(watt)) %>% pull()
  
- result <- tibble("date" = date,
-                  "watt" = watt)
+ result <- watt
  return(result)
 }
 
 ```
 
+
+
+### 2mmol Progress
+
+
+
+```{r}
+date_list <- data %>% distinct(datum)
+
+laktat_list <- list()
+for (i in seq_along(date_list$datum)) {
+  
+  date_selected <- date_list[i,] %>% pull()
+  data_selected <- data %>% filter(datum == date_selected)
+  
+  try(laktat_list[[i]] <- watt_2mmol(data_selected))
+  try(laktat_list[[i]]$watt_5mmol <- watt_xmmol(data_selected,5))
+  
+  laktat_list[i]$nr <- i
+  laktat_list[[i]]$date <- date_selected
+  #print(date_list[i,])
+}
+
+
+laktat_watt <- bind_rows(laktat_list)
+```
+
+
+```{r}
+laktat_watt%>% 
+    ggplot(aes(x=date))+
+    geom_point(aes(y=watt_2mmol, color = "2 mmol"))+
+  geom_smooth(aes(y=watt_2mmol, color = "2 mmol"))
+```
+```{r}
+laktat_watt%>% 
+    ggplot(aes(x=watt_2mmol))+
+    geom_point(aes(y=watt_5mmol, color = as.factor(year(date))), size = 3)
+```
+
+```{r}
+
+```
+
+### Laktat Curves
 ```{r}
 
 date_selected <- c("2021-01-28", "2021-01-03","2020-02-04","2019-02-09","2021-02-23", "2021-10-14")
@@ -266,76 +299,4 @@ ggsave("Results/Laktatkurve_", datum_selected,".png")
 
 
 
-### 2mmol Progress
-
-
-```{r}
-
-data_selected <- data %>% filter(datum == datum_selected) #year == jahr & month == monat)
-
-
-
-
-
-a = watt_2mmol(data_selected)
-a
-
-date_list <- data %>% distinct(datum)
-
-laktat_2mmol_list <- list()
-for (i in seq_along(date_list$datum)) {
-  
-  date_selected <- date_list[i,] %>% pull()
-  data_selected <- data %>% filter(datum == date_selected)
-  
-  try(laktat_2mmol_list[[i]] <- watt_2mmol(data_selected))
-  
-  laktat_2mmol_list[[i]]$i <- i
-  laktat_2mmol_list[[i]]$date <- date_selected
-  #print(date_list[i,])
-}
-
-date_list[i,]
-i
-bind_rows(laktat_2mmol_list) %>% mutate(watt = if_else(is.na(watt), 100, watt),
-                                        fehlender_wert = if_else(watt == 100, TRUE, FALSE)) %>%
-    ggplot(aes(x=date))+
-    geom_point(aes(y=watt, color = fehlender_wert))+
-    geom_line(aes(y=watt, color = fehlender_wert))
-```
-
-
-
-```{r}
-data_4m = data %>% filter(laktat <= ftp_laktat) %>% 
-  group_by(datum) %>% 
-  summarise(laktat_4m = max(laktat))
-
-data_4p = data %>% filter(laktat > ftp_laktat) %>% 
-  group_by(datum) %>% 
-  summarise(laktat_4p = min(laktat))
-
-data <- left_join(data,data_4m, by= c("datum"))
-
-data <- left_join(data,data_4p, by= c("datum"))
-
-data %>% filter(laktat == laktat_4p |
-                laktat == laktat_4m) %>% 
-  mutate(laktat_diff = laktat - lag(laktat),
-         watt_diff = watt - lag(watt),
-         l4_diff = ftp_laktat -lag(laktat),
-         watt_4 = lag(watt) + (watt_diff / laktat_diff) * l4_diff,
-         watt_lag = lag(watt),
-         laktat_lag = lag(laktat)) %>% 
-  select(datum, watt, laktat_diff,laktat,
-         l4_diff, watt_4, watt_lag, laktat_lag) %>%
-  filter(laktat_diff >= 0)
-
-
-```
-
-```{r}
-result %>% ggplot(aes(x=datum))+
-  geom_point(aes(y =watt))
-```
 
