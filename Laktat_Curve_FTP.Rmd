@@ -73,49 +73,51 @@ data %>% filter(laktat <= 2) %>%
 
 ## Functions
 
-```{r Funtkion}
-ftp_berechnung <- function(data_raw, datum_selected){
-  datum_selected <- as.Date(datum_selected)
-  data_raw <- data_raw %>% filter(datum == datum_selected) #year == jahr & month == monat)
+```{r ftp_berechnung}
 
-#fehlmessungen filter: (laktat muss steigen)
- data_raw <- data_raw %>% mutate(ungueltig = laktat-lag(laktat, 
-                                                default =0)) %>% 
-   filter(ungueltig >0) %>% select(-ungueltig)
- 
-  data_gemessen <- data_raw
- 
- model <- lm(laktat~(watt*watt),data=data_raw)#as.list(test) %>% 
-#model_laktat <- nls(laktat~a*exp(b*watt),data = data_raw,start = list(a=0.01,b=0.01))
-model_laktat <- nls(watt~a*log(b*laktat),data = data_raw,start = list(a=10,b=1))
-
-data_raw %>% data_grid(watt = seq_range(watt,30)) %>%
-  add_predictions(model,"laktat") %>%
-  ggplot(aes(x=watt,y=laktat))+geom_point()+
-  geom_point(data=data_raw,aes(color="original"))
-
-laktat_prediction <- data_raw %>% data_grid(laktat = seq_range(laktat,50)) %>%
-  add_predictions(model_laktat,"watt") 
-
-w_5m <- laktat_prediction %>% filter(laktat >4.9 & 
-                                     laktat < 5.1) %>% 
-            summarise(w_5m = mean(watt)) %>% round(digits=1)
-w_2m <- laktat_prediction %>% filter(laktat >1.9 & 
-                                       laktat < 2.1) %>% 
-  summarise(w_2m = mean(watt)) %>% round(digits=1)
-
-laktat_result <- data_gemessen %>% mutate(gemessen = TRUE) %>%
-                    select(laktat,watt,gemessen) %>%
-                                  bind_rows(laktat_prediction) %>%
-                    mutate(datum = datum_selected)
-
-result <-  list(data = laktat_result,#laktat_prediction,
-      w_5m = w_5m,
-      w_2m = w_2m)
-
-return(result)
+    ftp_berechnung <- function(data_raw, datum_selected){
+      datum_selected <- as.Date(datum_selected)
+      data_raw <- data_raw %>% filter(datum == datum_selected) #year == jahr & month == monat)
+    
+    #fehlmessungen filter: (laktat muss steigen)
+     data_raw <- data_raw %>% mutate(ungueltig = laktat-lag(laktat, 
+                                                    default =0)) %>% 
+       filter(ungueltig >0) %>% select(-ungueltig)
+     
+      data_gemessen <- data_raw
+     
+     model <- lm(laktat~(watt*watt),data=data_raw)#as.list(test) %>% 
+    #model_laktat <- nls(laktat~a*exp(b*watt),data = data_raw,start = list(a=0.01,b=0.01))
+    model_laktat <- nls(watt~a*log(b*laktat),data = data_raw,start = list(a=10,b=1))
+    
+    data_raw %>% data_grid(watt = seq_range(watt,30)) %>%
+      add_predictions(model,"laktat") %>%
+      ggplot(aes(x=watt,y=laktat))+geom_point()+
+      geom_point(data=data_raw,aes(color="original"))
+    
+    laktat_prediction <- data_raw %>% data_grid(laktat = seq_range(laktat,50)) %>%
+      add_predictions(model_laktat,"watt") 
+    
+    w_5m <- laktat_prediction %>% filter(laktat >4.9 & 
+                                         laktat < 5.1) %>% 
+                summarise(w_5m = mean(watt)) %>% round(digits=1)
+    w_2m <- laktat_prediction %>% filter(laktat >1.9 & 
+                                           laktat < 2.1) %>% 
+      summarise(w_2m = mean(watt)) %>% round(digits=1)
+    
+    laktat_result <- data_gemessen %>% mutate(gemessen = TRUE) %>%
+                        select(laktat,watt,gemessen) %>%
+                                      bind_rows(laktat_prediction) %>%
+                        mutate(datum = datum_selected)
+    
+    result <-  list(data = laktat_result,#laktat_prediction,
+          w_5m = w_5m,
+          w_2m = w_2m)
+    
+    return(result)
 }
 ```
+
 
 
 
@@ -216,6 +218,74 @@ laktat_watt%>%
 ```
 
 ### Laktat Curves
+
+```{r}
+
+
+d <-list()
+for (i in seq_along(date_list$datum)) {
+try(d[i] <-  ftp_berechnung(data, date_list$datum[i]))
+}
+
+
+laktat_selected <- bind_rows(d)  %>% 
+                      mutate(datum = as.factor(datum))
+
+laktat_selected%>%
+  ggplot(aes(x=watt, color = datum))+
+  geom_point(aes(y=laktat))+
+  geom_point(data = laktat_selected %>% filter(gemessen==TRUE),aes(y=laktat,), size = 4)+
+  geom_hline(yintercept = 2)
+
+
+```
+
+## HIER WEITERMACHEN
+
+cool wäre wenn sich die kurven bis 300w ziehen (Data Grid)
+
+```{r}
+laktat_selected <- laktat_selected %>% 
+    mutate(year = as.factor(year(datum)),
+           month = as.factor(month(datum)))
+
+watt_date <- laktat_selected  %>% 
+                  group_by(datum) %>%
+                            mutate(watt_2mmol = case_when(laktat <= 2 ~ watt, TRUE~ 0),
+                                   watt_5mmol = case_when(laktat <= 5 ~ watt, TRUE ~ 0)) %>%
+                              summarise(watt_2mmol = max(watt_2mmol),
+                                        watt_5mmol = max(watt_5mmol))
+
+best_date <- watt_date %>% filter(watt_2mmol == max(watt_date$watt_2mmol) &
+                       watt_5mmol == max(watt_date$watt_5mmol))
+
+best_data <- laktat_selected %>% filter(datum == best_date$datum) %>% select(laktat, watt,gemessen)
+
+laktat_selected %>%
+  ggplot(aes(x=watt, color = month))+
+  geom_point(aes(y=laktat))+
+  geom_point(data = laktat_selected %>% filter(gemessen==TRUE),aes(y=laktat), size = 4)+
+  geom_line(data = best_data %>% filter(is.na(gemessen)), aes(y=laktat, color ="best"), color = "black", alpha = 1/2)+
+  geom_point(data = best_data %>% filter(gemessen==TRUE), aes(y=laktat, color ="best"), color = "black", size = 2)+
+  scale_color_brewer(palette="Blues")+
+  geom_hline(yintercept = 2)+
+  facet_wrap(year~.)+
+  theme_minimal()
+```
+```{r}
+laktat_selected %>% 
+  ggplot(aes(x=watt, color = year))+
+  geom_point(aes(y=laktat))+
+  geom_point(data = laktat_selected %>% filter(gemessen==TRUE),aes(y=laktat), size = 4)+
+  geom_line(data = best_data %>% filter(is.na(gemessen)), aes(y=laktat, color ="best"), color = "black", alpha = 1/2)+
+  geom_point(data = best_data %>% filter(gemessen==TRUE), aes(y=laktat, color ="best"), color = "black", size = 2)+
+  scale_color_brewer(palette="Blues")+
+  geom_hline(yintercept = 2)+
+  facet_wrap(month~.)+
+  theme_minimal()
+```
+
+
 ```{r}
 
 date_selected <- c("2021-01-28", "2021-01-03","2020-02-04","2019-02-09","2021-02-23", "2021-10-14")
