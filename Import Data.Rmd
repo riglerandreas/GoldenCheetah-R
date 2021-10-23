@@ -68,8 +68,8 @@ count(files)
 # Only one day for testing 
 
 ```{r}
-start_date <- "2021-10-21"
-end_date <- "2021-10-27"
+start_date <- "2020-01-01"
+end_date <- "2021-01-03"
 
 
 date_selected <- tibble(file_date = seq.Date(as.Date(start_date),
@@ -278,8 +278,28 @@ date_ftp
 ```
 
 
+
+```{r}
+old_aggregations
+
+update = FALSE
+
+for (i in seq_along(files_selected$file_name)){
+if((files_selected$file_name[i] %in% old_aggregations$file) | update == TRUE){
+  print("yes")
+}else{print(files_selected$file_name[i])}
+}
+```
+
+Hier weitertmachen:
+-fehler unten ansehen und schritt für schritt ausbessern
+(in eigener comand cell mit immer nur einer datei)
 ## Aggregation
 ```{r}
+update = FALSE
+
+old_aggregations <- read_rds("aggregations_result.rds")
+
 
 
 data_ride <- list()
@@ -287,67 +307,73 @@ data_rides <- list()
 aggregation_rides <- list()
 aggregation_ride <- tibble()
 for (i in seq_along(files_selected$file_name)){
-  datei <- str_c(pfad_aktivity,files_selected$file_name[i])
-    try({
-         data_ride <- read_json(datei)
-         aggregation_ride <- tibble("workout_code" = as.character(data_ride$RIDE$TAGS$`Workout Code`))
-         aggregation_ride$device <- data_ride$RIDE$TAGS$Rad
-         aggregation_ride$start_time <-data_ride$RIDE$STARTTIME
-         aggregation_ride <-aggregation_ride %>% mutate(date = as.Date(start_time))
-         
-         #connect to the FTP date
-         aggregation_ride <- aggregation_ride %>% left_join(date_ftp, by ="date")
-         FTP <- aggregation_ride$ftp
-         
-         if (samples == 1) {  #there is trainings data
-     
-                ridedata_list <- data_ride[[1]]$SAMPLES
-                ridedata <- bind_rows(ridedata_list)
-                
-                aggregations <- tibble(movement_time_sec = calculate_movement_time(ridedata),
-                                       elevation_gain = calculate_elevation_gain(ridedata),
-                                       NP = calculate_NP(ridedata),
-                                       IF = calculate_IF(ridedata, FTP),
-                                       TSS = calculate_TSS(ridedata, FTP),
-                                       watt_mean = calculate_w_mean(ridedata),
-                                       hr_mean = calculate_hr_mean(ridedata),
-                                       w_1min = calculate_best_watt(ridedata,min = 1),
-                                       w_5min = calculate_best_watt(ridedata,min = 5),
-                                       w_20min = calculate_best_watt(ridedata,min = 20),
-                                       w_60min = calculate_best_watt(ridedata,min = 60))
-                
-                aggregation_ride$km <-ridedata%>% summarise(km = max(KM,na.rm = TRUE)) %>% pull()
-                aggregation_ride$cadence <-ridedata%>% summarise(cadence = as.integer(mean(CAD,na.rm = TRUE))) %>% pull()
-                
-                                # check for overrides               
-                override <- data_ride$RIDE$OVERRIDES
-                if(is.null(override) == FALSE){
-                   for (i_ov in seq_along(override)){
-                      override_name <- data_ride$RIDE$OVERRIDES[[i_ov]] %>% names()
-                      override_value <- data_ride$RIDE$OVERRIDES[[i_ov]][[1]]$value
-                      if(override_name == "elevation_gain"){
-                        aggregations$elevation_gain <- as.integer(override_value)
-                      }else if(override_name == "coggan_tss"){
-                        aggregations$TSS <- as.integer(override_value)
-                      }
+  if((!(files_selected$file_name[i] %in% old_aggregations$file_name)) | update == TRUE){
+    datei <- str_c(pfad_aktivity,files_selected$file_name[i])
+      try({
+           data_ride <- read_json(datei)
+           aggregation_ride <- tibble(file_name = files_selected$file_name[i],
+                                      workout_code = as.character(data_ride$RIDE$TAGS$`Workout Code`))
+           aggregation_ride$device <- data_ride$RIDE$TAGS$Rad
+           aggregation_ride$start_time <-data_ride$RIDE$STARTTIME
+           aggregation_ride <-aggregation_ride %>% mutate(date = as.Date(start_time))
+           
+           #connect to the FTP date
+           aggregation_ride <- aggregation_ride %>% left_join(date_ftp, by ="date")
+           FTP <- aggregation_ride$ftp
+           
+           if (samples == 1) {  #there is trainings data
+       
+                  ridedata_list <- data_ride[[1]]$SAMPLES
+                  ridedata <- bind_rows(ridedata_list)
+                  
+                  aggregations <- tibble(movement_time_sec = calculate_movement_time(ridedata),
+                                         elevation_gain = calculate_elevation_gain(ridedata),
+                                         NP = calculate_NP(ridedata),
+                                         IF = calculate_IF(ridedata, FTP),
+                                         TSS = calculate_TSS(ridedata, FTP),
+                                         watt_mean = calculate_w_mean(ridedata),
+                                         hr_mean = calculate_hr_mean(ridedata),
+                                         w_1min = calculate_best_watt(ridedata,min = 1),
+                                         w_5min = calculate_best_watt(ridedata,min = 5),
+                                         w_20min = calculate_best_watt(ridedata,min = 20),
+                                         w_60min = calculate_best_watt(ridedata,min = 60))
+                  
+                  aggregation_ride$km <-ridedata%>% summarise(km = max(KM,na.rm = TRUE)) %>% pull()
+                  aggregation_ride$cadence <-ridedata%>% summarise(cadence = as.integer(mean(CAD,na.rm = TRUE))) %>% pull()
+                  
+                                  # check for overrides               
+                  override <- data_ride$RIDE$OVERRIDES
+                  if(is.null(override) == FALSE){
+                     for (i_ov in seq_along(override)){
+                        override_name <- data_ride$RIDE$OVERRIDES[[i_ov]] %>% names()
+                        override_value <- data_ride$RIDE$OVERRIDES[[i_ov]][[1]]$value
+                        if(override_name == "elevation_gain"){
+                          aggregations$elevation_gain <- as.integer(override_value)
+                        }else if(override_name == "coggan_tss"){
+                          aggregations$TSS <- as.integer(override_value)
+                        }
+                    }
                   }
-                }
-
-
-
-
-                
-                aggregation_ride <- aggregation_ride %>% bind_cols(aggregations)
-         }
-    })
-  aggregation_rides[[i]] <- aggregation_ride
-  print(i)
+  
+  
+  
+  
+                  
+                  aggregation_ride <- aggregation_ride %>% bind_cols(aggregations)
+           }
+      })
+    aggregation_rides[[i]] <- aggregation_ride
+    print(datei)
+  }
 }
 
-aggregations_result <- bind_rows(aggregation_rides) %>% mutate(start_time = as.POSIXct(start_time)) 
-aggregations_result
+if(!is_empty(aggregation_rides)){
+  aggregations_result <- bind_rows(aggregation_rides) %>% mutate(start_time = as.POSIXct(start_time)) 
+  aggregations_result <- aggregations_result %>% bind_rows(old_aggregations)
+  
+  write_rds(aggregations_result, "aggregations_result.rds")
+}
 
-write_rds(aggregations_result, "aggregations_result.rds")
 ```
 
 
