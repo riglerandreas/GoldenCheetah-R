@@ -15,6 +15,15 @@ library(readxl)
 #library(gapminder)
 library(lubridate)
 library(modelr)
+
+
+library(extrafont)
+#font_import() #only the first time when this package is used
+```
+```{r}
+#https://www.r-bloggers.com/2019/03/adding-custom-fonts-to-ggplot-in-r/
+loadfonts(device = "win", quiet = TRUE)
+
 ```
 
 
@@ -43,34 +52,6 @@ data <- data %>% mutate(year =year(datum),
 ```
 
 
-
-
-
-## Übersicht
-
-```{r Plot Jahresübersicht}
-data %>% ggplot(aes(x=watt,color=as.factor(datum)))+
-  geom_point(aes(y=laktat))+
-  geom_line(aes(y=laktat,linetype = as.factor(year)))
-
-data %>% #filter(month %in% c(5,6))  %>% 
-  ggplot(aes(x=watt,color=as.factor(datum)))+
-  geom_point(aes(y=laktat))+
-  geom_line(aes(y=laktat))+
-  geom_hline(yintercept = 2)+
-  facet_wrap(year~.)
-```
-
-```{r}
-data %>% filter(laktat <= 2) %>% 
-                    group_by(datum) %>%
-                      summarise(watt = max(watt)) %>%
-  ggplot(aes(x=datum))+
-     geom_point(aes(y=watt))
-              
-```
-
-
 ## Functions
 
 ```{r ftp_berechnung}
@@ -95,7 +76,7 @@ data %>% filter(laktat <= 2) %>%
       ggplot(aes(x=watt,y=laktat))+geom_point()+
       geom_point(data=data_raw,aes(color="original"))
     
-    laktat_prediction <- data_raw %>% data_grid(laktat = seq_range(laktat,50)) %>%
+    laktat_prediction <- data_raw %>% data_grid(laktat = seq_range(0.1:10.1,200)) %>%
       add_predictions(model_laktat,"watt") 
     
     w_5m <- laktat_prediction %>% filter(laktat >4.9 & 
@@ -213,10 +194,6 @@ laktat_watt%>%
     geom_point(aes(y=watt_5mmol, color = as.factor(year(date))), size = 3)
 ```
 
-```{r}
-
-```
-
 ### Laktat Curves
 
 ```{r}
@@ -242,12 +219,16 @@ laktat_selected%>%
 
 ## HIER WEITERMACHEN
 
-cool wäre wenn sich die kurven bis 300w ziehen (Data Grid)
+statt zahlen monatsnamen
+hintergrund dunkler oder leichter rahmen um facet
+year etwas größer
+legenden platz etwas größer
+titel mit erklärung
 
 ```{r}
 laktat_selected <- laktat_selected %>% 
     mutate(year = as.factor(year(datum)),
-           month = as.factor(month(datum)))
+           month = month(datum, label = TRUE, abbr = FALSE))
 
 watt_date <- laktat_selected  %>% 
                   group_by(datum) %>%
@@ -256,22 +237,80 @@ watt_date <- laktat_selected  %>%
                               summarise(watt_2mmol = max(watt_2mmol),
                                         watt_5mmol = max(watt_5mmol))
 
-best_date <- watt_date %>% filter(watt_2mmol == max(watt_date$watt_2mmol) &
-                       watt_5mmol == max(watt_date$watt_5mmol))
+best_date <- watt_date %>% filter(watt_2mmol == max(watt_date$watt_2mmol)) %>% 
+                          filter(watt_5mmol == max(watt_5mmol))
 
-best_data <- laktat_selected %>% filter(datum == best_date$datum) %>% select(laktat, watt,gemessen)
+best_data <- laktat_selected %>% filter(datum == best_date$datum) %>% select(laktat, watt,gemessen, datum)
+
+#---------position of the annotiation
+best_data_gemessen <- best_data %>% filter(gemessen == TRUE)
+y_annot <- best_data_gemessen[3,"laktat"] %>% pull() -0.25
+x_annot <- best_data_gemessen[3,"watt"] %>% pull()+30
+
+
+#========================COLOR
+#https://statisticsglobe.com/identify-default-color-palette-names-of-ggplot2-in-r
+month_Colors <- c("#00A5FF", "#00BDD0", "#00BE5", "#00C1AA", 
+                  "#00BF7D", "#00BA42", "#39B600",
+                  "#72B000", "#A3A500", "#C59900", 
+                  "#D89000", "#E7861B") 
+names(month_Colors) <- as.character(c("Jänner", "Februar", "März", "April", "Mai", "Juni",
+                                      "Juli", "August", "September", "Oktober", "November", "Dezember")) #c(1:12))
+
+
+#=======================PLOT==============================
 
 laktat_selected %>%
   ggplot(aes(x=watt, color = month))+
-  geom_point(aes(y=laktat))+
+  geom_point(data = laktat_selected %>% filter(is.na(gemessen)), aes(y=laktat), size =1)+
   geom_point(data = laktat_selected %>% filter(gemessen==TRUE),aes(y=laktat), size = 4)+
-  geom_line(data = best_data %>% filter(is.na(gemessen)), aes(y=laktat, color ="best"), color = "black", alpha = 1/2)+
+  geom_line(data = best_data %>% filter(is.na(gemessen)), 
+            aes(y=laktat, color ="best", linetype = datum),
+            color = "black", alpha = 1/2)+
+  
   geom_point(data = best_data %>% filter(gemessen==TRUE), aes(y=laktat, color ="best"), color = "black", size = 2)+
-  scale_color_brewer(palette="Blues")+
-  geom_hline(yintercept = 2)+
+  
+  #scale_color_brewer(palette="Blues")+
+  scale_color_manual(values = month_Colors)+
+  
+  geom_hline(yintercept = 2, size=0.5, color = "lightgreen", linetype = 5)+
+  geom_hline(yintercept = 5, size=0.5, color = "red", linetype = 5)+
+  coord_cartesian(xlim = c(50,350))+
+  scale_y_continuous(breaks = c(0,2,4,6,8,10))+
+  
+   theme(panel.background = element_rect(fill = "white", colour = "grey80"),
+         panel.grid.major = element_line(colour = "grey87"), 
+         panel.grid.minor = element_line(colour = "transparent", linetype = 2),
+         strip.background =element_rect(fill="transparent"),
+         strip.text = element_text( family = "Arial Black"),
+
+         legend.key = element_rect(colour = NA, fill = NA),
+         #get fonds with: fonts()
+         legend.text =element_text(color = "black", family = "Arial"),
+         legend.title = element_text(family =  "Arial"))+
+  
   facet_wrap(year~.)+
-  theme_minimal()
+ 
+  labs(y = "laktat [mmol]",
+       x = "power [watt]",
+       color = "month:",
+       linetype = "best result:")
+
+
+
 ```
+
+## Export Laktat values
+
+```{r}
+laktat_selected %>% group_by(datum) %>% mutate(w_2mmol = if_else(laktat <= 2, watt, 0),
+                                               w_4mmol = if_else(laktat <= 4, watt, 0)) %>%
+                    summarise(w_2mmol = max(w_2mmol, na.rm = TRUE),
+                              w_4mmol = max(w_4mmol, na.rm = TRUE)) %>%
+  write_csv2("./Results/laktat_watt.csv")
+```
+
+
 ```{r}
 laktat_selected %>% 
   ggplot(aes(x=watt, color = year))+
@@ -284,89 +323,6 @@ laktat_selected %>%
   facet_wrap(month~.)+
   theme_minimal()
 ```
-
-
-```{r}
-
-date_selected <- c("2021-01-28", "2021-01-03","2020-02-04","2019-02-09","2021-02-23", "2021-10-14")
-
-d <-list()
-for (i in seq_along(date_selected)) {
-d[i] <-  ftp_berechnung(data, date_selected[i])
-}
-
-
-laktat_selected <- bind_rows(d)  %>% 
-                      mutate(datum = as.factor(datum))
-
-laktat_selected%>%
-  ggplot(aes(x=watt, color = datum))+
-  geom_point(aes(y=laktat))+
-  geom_point(data = laktat_selected %>% filter(gemessen==TRUE),aes(y=laktat,), size = 4)+
-  geom_hline(yintercept = 2)
-```
-
-
-```{r}
-#jahr <- 2020
-#monat <- 1
-
-datum_selected <- as.Date("2021-10-14")
-```
-
-
-
-```{r}
-test <- data %>% filter(datum == datum_selected) #year == jahr & month == monat)
-
-#fehlmessungen filter: (laktat muss steigen)
- test <- test %>% mutate(ungueltig = laktat-lag(laktat, 
-                                                default =0)) %>% 
-   filter(ungueltig >0) %>% select(-ungueltig)
- 
-
-```
-
-
-```{r}
-model <- lm(laktat~(watt*watt),data=test)#as.list(test) %>% 
-model_laktat <- nls(laktat~a*exp(b*watt),data = test,start = list(a=0.01,b=0.01))
-model_laktat <- nls(watt~a*log(b*laktat),data = test,start = list(a=10,b=1))
-
-test %>% data_grid(watt = seq_range(watt,30)) %>%
-  add_predictions(model,"laktat") %>%
-  ggplot(aes(x=watt,y=laktat))+geom_point()+
-  geom_point(data=test,aes(color="original"))
-
-laktat_prediction <- test %>% data_grid(laktat = seq_range(laktat,50)) %>%
-  add_predictions(model_laktat,"watt") 
-
-w_5m <- laktat_prediction %>% filter(laktat >4.9 & 
-                                     laktat < 5.1) %>% 
-            summarise(mean(watt)) %>% round(digits=1)
-w_2m <- laktat_prediction %>% filter(laktat >1.9 & 
-                                       laktat < 2.1) %>% 
-  summarise(mean(watt)) %>% round(digits=1)
-
-#jahr <- test[1,"year"]
-#monat <- test[1,"month"]
-
-laktat_prediction %>%
-  ggplot(aes(x=watt,y=laktat))+geom_point()+
-  geom_point(data=test,aes(color="Messung"))+
-   labs(title =str_c("Laktattest ", datum_selected ,":    ", w_5m, "W bei 5mmol (~FTP)"),
-       subtitle = str_c(w_2m, "W bei 2mmol"),
-       y= "Laktat [mmol]",
-       x= "Watt [W]",
-       color="")
-
-  #labs(title =str_c("Laktattest ", jahr ,"-", monat, ":    ", w_5m, "W bei 5mmol (~FTP)"),
- 
-
-ggsave("Results/Laktatkurve_", datum_selected,".png")
-
-```
-
-
+n
 
 
