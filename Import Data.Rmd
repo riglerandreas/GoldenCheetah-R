@@ -68,8 +68,8 @@ count(files)
 # Only one day for testing 
 
 ```{r}
-start_date <- "2020-01-01"
-end_date <- "2021-01-03"
+start_date <- "2021-01-01"
+end_date <- "2021-10-25"
 
 
 date_selected <- tibble(file_date = seq.Date(as.Date(start_date),
@@ -85,7 +85,8 @@ files_selected <- files  %>% right_join(date_selected,
 
 
 
-files_selected
+files_selected %>% filter(str_detect(file_name,"24_14"))
+
 ```
 
 
@@ -108,7 +109,10 @@ calculate_movement_time <- function(ridedata){
   return(result$movement_time)
 }
 
-#------------elevation gain:
+
+
+
+#------------elevation gain:--------------------------------------------------------------------
 
 calculate_elevation_gain <- function(ridedata){
   if (sum(colnames(ridedata) %>% str_detect("ALT")) == 0){
@@ -116,14 +120,35 @@ calculate_elevation_gain <- function(ridedata){
   }else{
    result <- ridedata %>% 
             arrange(SECS) %>% mutate(uphill = ALT-lag(ALT),
+                                     uphill = as.integer(uphill),
                         uphill = if_else(uphill >0, 
-                                         if_else(uphill < 1,uphill,0), #more than 1m/sec is too much (at the start when no altitude is available)
-                                         0)) %>%
+                                         if_else(uphill < 1,uphill,0L), #more than 1m/sec is too much (at the start when no altitude is available)
+                                         0L)) %>%
   summarise(uphill = sum(uphill,na.rm = TRUE))
    return(result$uphill)
   }
   
 }
+
+
+
+#------------mean cadence:--------------------------------------------------------------------
+
+calculate_cadence <- function(ridedata){
+  if (sum(colnames(ridedata) %>% str_detect("CAD")) == 0){
+    return(as.numeric(NA))
+  }else{
+   result <- ridedata %>% summarise(cadence = mean(CAD), na.rm = TRUE)
+
+   return(result$cadence)
+  }
+  
+}
+
+
+
+
+
 
 #----------Notebook 3_Aktivitäten_analysieren_v4.Rmd--------------------------------------
 calculate_hr_mean <- function(d){
@@ -278,23 +303,13 @@ date_ftp
 ```
 
 
+ Hier weitermachen:
+ - 2mmol and 4mmol value
+- calculate time < 2mmol watt
+- calculate time > 4mmol watt
 
-```{r}
-old_aggregations
-
-update = FALSE
-
-for (i in seq_along(files_selected$file_name)){
-if((files_selected$file_name[i] %in% old_aggregations$file) | update == TRUE){
-  print("yes")
-}else{print(files_selected$file_name[i])}
-}
-```
-
-Hier weitertmachen:
--fehler unten ansehen und schritt für schritt ausbessern
-(in eigener comand cell mit immer nur einer datei)
 ## Aggregation
+
 ```{r}
 update = FALSE
 
@@ -307,7 +322,7 @@ data_rides <- list()
 aggregation_rides <- list()
 aggregation_ride <- tibble()
 for (i in seq_along(files_selected$file_name)){
-  if((!(files_selected$file_name[i] %in% old_aggregations$file_name)) | update == TRUE){
+  if(str_detect(files_selected$file_name[i], "2021_01_26_18_09_21")){
     datei <- str_c(pfad_aktivity,files_selected$file_name[i])
       try({
            data_ride <- read_json(datei)
@@ -321,6 +336,9 @@ for (i in seq_along(files_selected$file_name)){
            aggregation_ride <- aggregation_ride %>% left_join(date_ftp, by ="date")
            FTP <- aggregation_ride$ftp
            
+            #is there any trainings data?
+            samples <- sum(names(data_ride[[1]]) == "SAMPLES")
+           
            if (samples == 1) {  #there is trainings data
        
                   ridedata_list <- data_ride[[1]]$SAMPLES
@@ -328,6 +346,7 @@ for (i in seq_along(files_selected$file_name)){
                   
                   aggregations <- tibble(movement_time_sec = calculate_movement_time(ridedata),
                                          elevation_gain = calculate_elevation_gain(ridedata),
+                                         cadence = calculate_cadence(ridedata),
                                          NP = calculate_NP(ridedata),
                                          IF = calculate_IF(ridedata, FTP),
                                          TSS = calculate_TSS(ridedata, FTP),
@@ -339,7 +358,6 @@ for (i in seq_along(files_selected$file_name)){
                                          w_60min = calculate_best_watt(ridedata,min = 60))
                   
                   aggregation_ride$km <-ridedata%>% summarise(km = max(KM,na.rm = TRUE)) %>% pull()
-                  aggregation_ride$cadence <-ridedata%>% summarise(cadence = as.integer(mean(CAD,na.rm = TRUE))) %>% pull()
                   
                                   # check for overrides               
                   override <- data_ride$RIDE$OVERRIDES
@@ -362,28 +380,24 @@ for (i in seq_along(files_selected$file_name)){
                   aggregation_ride <- aggregation_ride %>% bind_cols(aggregations)
            }
       })
-    aggregation_rides[[i]] <- aggregation_ride
-    print(datei)
+    
+    
+    
+    
+    
+    
   }
-}
-
-if(!is_empty(aggregation_rides)){
-  aggregations_result <- bind_rows(aggregation_rides) %>% mutate(start_time = as.POSIXct(start_time)) 
-  aggregations_result <- aggregations_result %>% bind_rows(old_aggregations)
   
-  write_rds(aggregations_result, "aggregations_result.rds")
 }
-
 ```
-
-
 
 ```{r}
 aggregations_result %>% mutate(start_time = as.POSIXct(start_time)) %>% 
    ggplot(aes(x=start_time))+
    geom_point(aes(y=hr_mean, color ="hr"))+
    geom_point(aes(y=watt_mean))+
-   geom_line(aes(y= km, color = "km"))
+   geom_line(aes(y= km, color = "km"))+
+  geom_line(aes(y= ftp, color = "FTP"))
 ```
 
 
