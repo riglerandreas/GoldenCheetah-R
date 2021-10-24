@@ -18,7 +18,7 @@ library(modelr)
 
 
 library(extrafont)
-font_import()
+#font_import() #only the first time when this package is used
 ```
 ```{r}
 #https://www.r-bloggers.com/2019/03/adding-custom-fonts-to-ggplot-in-r/
@@ -300,6 +300,15 @@ laktat_selected %>%
 
 ```
 
+## Export Laktat values
+
+```{r}
+laktat_selected %>% group_by(datum) %>% mutate(w_2mmol = if_else(laktat <= 2, watt, 0),
+                                               w_4mmol = if_else(laktat <= 4, watt, 0)) %>%
+                    summarise(w_2mmol = max(w_2mmol, na.rm = TRUE),
+                              w_4mmol = max(w_4mmol, na.rm = TRUE)) %>%
+  write_csv2("./Results/laktat_watt.csv")
+```
 
 
 ```{r}
@@ -314,6 +323,6 @@ laktat_selected %>%
   facet_wrap(month~.)+
   theme_minimal()
 ```
-
+n
 
 
