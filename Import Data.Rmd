@@ -36,6 +36,9 @@ test
 
 ```{r Wattwerte Grenzen}
 
+path_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+
 mmol_2 <- 200
 ftp <- 260
 watt_z1 <- c(80:(mmol_2-1))
@@ -284,7 +287,7 @@ calculate_best_w5 <- function(d){
 ## Import FTP data
 
 ```{r}
-ftp_data_raw <- read_csv2("./Data/FTP.csv")
+ftp_data_raw <- read_csv2(str_c(path_ftp,"FTP.csv"))
 
 ftp_data <- ftp_data_raw %>% mutate(date = as.Date(datum, "%d.%m.%Y")) %>% select(-datum) %>% arrange(date)%>% mutate(date_max = lead(date) - 1,
                     date_min = date,

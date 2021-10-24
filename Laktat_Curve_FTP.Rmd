@@ -36,7 +36,7 @@ ftp_laktat <- 5  #bei wieviel mmol ca FTP - bei mir sind es ziemlich genau 5mmol
 
 ```{r einlesen und bearbeiten}
 
-path_laktat <- "C:/Users/rigle/Documents/Training/Laktat/"
+path_laktat <- "C:/Users/rigle/Documents/Training/Laktat Watt/"
 
 data <- read_excel(str_c(path_laktat,"Laktat.xls"))
 
@@ -303,11 +303,12 @@ laktat_selected %>%
 ## Export Laktat values
 
 ```{r}
+
 laktat_selected %>% group_by(datum) %>% mutate(w_2mmol = if_else(laktat <= 2, watt, 0),
                                                w_4mmol = if_else(laktat <= 4, watt, 0)) %>%
                     summarise(w_2mmol = max(w_2mmol, na.rm = TRUE),
                               w_4mmol = max(w_4mmol, na.rm = TRUE)) %>%
-  write_csv2("./Results/laktat_watt.csv")
+  write_csv2("./laktat_watt.csv")
 ```
 
 
