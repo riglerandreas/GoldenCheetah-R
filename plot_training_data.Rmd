@@ -1,0 +1,209 @@
+---
+title: "Training_plots"
+author: "ari"
+date: "25 10 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+# Ideas
+- ftp seperate into indoor and outdoor
+- percentage of time in zines
+- estimate w_2mmol for time before laktat measurement
+- categorize activities
+- detect a pattern
+- define seasons
+
+```{r}
+path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+training_data_raw <- read_rds(str_c(path_laktat_ftp,"Results/aggregations_result.rds"))
+```
+
+## Seasons
+```{r}
+
+make_seasons <- function(d){
+  season_date <- tibble(date = seq.Date(as.Date(d$start),
+                                             as.Date(d$end), 
+                                             by = "day") ) %>%
+    mutate(season = d$season)
+  return(season_date)
+}
+
+
+season_list <- tibble(season = c("2017","2021"), 
+                      start = c("2017-01-01","2021-01-01"), 
+                      end = c("2017-06-11","2021-06-11"))
+
+
+season_date_list <- list()
+for(i in seq_along(season_list$season)){
+  season <- season_list[i,]
+   season_date_list[[i]] <- make_seasons(season)
+}
+
+season_date <- bind_rows(season_date_list)
+
+
+```
+
+## Wrangle
+
+### Clean
+```{r}
+training_data_clean<- training_data_raw %>% mutate(movement_time_sec = replace_na(movement_time_sec, 0),
+                                                   TSS = replace_na(TSS,0),
+                                                   IF = replace_na(IF,0)) 
+```
+
+### Add some information
+
+```{r}
+ training_data_clean<- training_data_clean %>% mutate(day = lubridate::yday(date)) 
+```
+
+
+### Join with season data
+
+```{r}
+training_data_clean<- training_data_clean %>% left_join(season_date, by = "date")
+```
+
+```{r}
+training_data_clean %>% filter(!is.na(season)) %>% 
+            mutate(day = lubridate::yday(date)) %>%
+  ggplot(aes(x= day)) +
+  geom_line(aes(y= ftp, color = "FTP"), size =1.3) +
+  geom_line(aes(y= w_2mmol, color = "2 mmol"))+
+  geom_line(aes(y= w_4mmol, color = "4 mmol"))+
+  geom_line(aes(y= w_5mmol, color = "5 mmol")) +
+  facet_wrap(season~.)
+```
+
+
+
+```{r}
+training_data_clean %>% filter(!is.na(season)) %>% 
+  group_by(season) %>% arrange(date) %>%
+   mutate(time_cum = cumsum(movement_time_sec)/(3600),
+          TSS_cum = cumsum(TSS),
+          IF_cum = cumsum(IF*movement_time_sec)) %>% 
+  ungroup() %>%
+   mutate(time_cum_rel = time_cum / max(time_cum)*100,
+          TSS_cum_rel = TSS_cum / max(TSS_cum)*100,
+          IF_cum_rel = IF_cum / max(IF_cum)*100) %>%
+  
+  
+          pivot_longer(cols = c("TSS_cum", "time_cum", "time_cum_rel","TSS_cum_rel", "IF_cum_rel", "watt_mean", "hr_mean"), 
+                       names_to = "metric")  %>%
+  
+  
+  filter(metric %in% c("time_cum_rel","TSS_cum_rel", "IF_cum_rel", "watt_mean", "hr_mean")) %>%
+
+  ggplot(aes(x= day)) +
+  geom_line(aes(y = value, color = season))+
+  facet_wrap(metric~., scales= "free")+
+  labs(y = "Percent",
+       x= "day of year")+
+  theme_light()
+```
+
+
+```{r}
+training_data_clean %>% filter(!is.na(season)) %>% 
+  group_by(season) %>% arrange(date) %>%
+   mutate(time_cum = cumsum(movement_time_sec)/(3600),
+          TSS_cum = cumsum(TSS),
+          IF_cum = cumsum(IF*movement_time_sec)) %>% 
+  ungroup() %>%
+   mutate(time_cum_rel = time_cum / max(time_cum)*100,
+          TSS_cum_rel = TSS_cum / max(TSS_cum)*100,
+          IF_cum_rel = IF_cum / max(IF_cum)*100) %>%
+  
+  
+          pivot_longer(cols = c("TSS_cum", "time_cum", "time_cum_rel","TSS_cum_rel", "IF_cum_rel", "watt_mean", "hr_mean"), 
+                       names_to = "metric")  %>%
+  
+  
+  filter(metric %in% c("watt_mean", "hr_mean")) %>%
+
+  ggplot(aes(x= day)) +
+  geom_line(aes(y = value, color = season))+
+  geom_smooth(aes(y=value, color = season))+
+  facet_wrap(metric~., scales= "free")+
+  labs(y = "Percent",
+       x= "day of year")+
+  theme_light()
+```
+ 
+```{r}
+training_data_clean %>% ggplot()+geom_histogram(aes(IF))
+```
+
+
+```{r}
+training_data_clean %>% filter(!is.na(season)) %>% 
+  group_by(season) %>% arrange(date) %>%
+   mutate(time_cum = cumsum(movement_time_sec)/(3600),
+          TSS_cum = cumsum(TSS),
+          IF_cum = cumsum(IF*movement_time_sec)) %>% 
+  ungroup() %>%
+   mutate(time_cum_rel = time_cum / max(time_cum)*100,
+          TSS_cum_rel = TSS_cum / max(TSS_cum)*100,
+          IF_cum_rel = IF_cum / max(IF_cum)*100) %>%
+  mutate(IF_kat = case_when(IF > 0.8 ~ "high",
+                            TRUE ~ " low")) %>%
+  
+
+
+  ggplot(aes(x= day)) +
+  geom_point(aes(y = watt_mean, color = "watt_mean", size = IF_kat), alpha = 0.5)+
+  geom_smooth(aes(y=watt_mean, color = "watt_mean"))+
+    geom_point(aes(y = hr_mean, color = "hr_mean"))+
+  geom_smooth(aes(y=hr_mean, color = "hr_mean"))+
+  geom_hline(yintercept = 130)+
+  facet_wrap(season~., scales= "free")+
+  labs(y = "Percent",
+       x= "day of year")+
+  theme_light()
+```
+
+
+
+```{r}
+training_data_clean %>% filter((date) > as.Date("2021-01-01")) %>% ggplot(aes(x= date)) +
+  geom_line(aes(y= ftp, color = "FTP"), size =1.3) +
+  geom_line(aes(y= w_2mmol, color = "2 mmol"))+
+  geom_line(aes(y= w_4mmol, color = "4 mmol"))+
+  geom_line(aes(y= w_5mmol, color = "5 mmol"))
+```
+
+`
+
+
+```{r}
+training_data %>% colnames()
+
+training_data %>% ggplot(aes(x= date)) +
+  geom_line(aes(y= movement_time_sec, color = "movement_time_sec"), size =1.3) +
+  geom_line(aes(y= time_2mmol, color = "time_2mmol"))+
+  geom_line(aes(y= time_4mmol, color = "time_4mmol"))+
+  geom_line(aes(y= time_below_w_min, color = "time_below_w_min"))
+```
+
+```{r}
+training_data %>% colnames()
+
+training_data %>% ggplot(aes(x= date)) +
+  geom_rug(aes(y= km, fill = "km")) +
+  geom_point(aes(y= km, color = "km"))
+```
+
