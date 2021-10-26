@@ -28,9 +28,20 @@ training_data_raw <- read_rds(str_c(path_laktat_ftp,"Results/aggregations_result
 ```
 
 ## Seasons
-```{r}
 
+Define the saeasons, Name and end date:
+```{r}
+season_list <-   tibble(season = c("2016","2017","2019","2021_Feb","2021_Apr","2021_Okt"), 
+                      end = as.Date(c("2016-07-20","2017-05-22","2019-06-05","2021-02-26", "2021-04-21","2021-10-11")))
+```
+
+Calculate the sesaons and create  
+season_date  
+table.
+```{r}
+#================================Season functions==========================================
 make_seasons <- function(d){
+  #create a sequence of dates out of start date and end date
   season_date <- tibble(date = seq.Date(as.Date(d$start),
                                              as.Date(d$end), 
                                              by = "day") ) %>%
@@ -38,15 +49,31 @@ make_seasons <- function(d){
   return(season_date)
 }
 
+date_past <- function(date_sel, days_past = 150){ 
+  #Calculate the date days_past days before the date date_sel
+  daynr_past <- lubridate::yday(date_sel) -days_past
+  year_past = year(date_sel)
+  if(as.integer(daynr_past) < 0){
+    year_past = year_past - 1
+    daynr_past <- daynr_past +365
+    date_past <- as.Date(strptime(paste(year_past, daynr_past), format="%Y %j"))
+    
+    return(date_past)
+  }else{
+        date_past <- as.Date(strptime(paste(year_past, daynr_past), format="%Y %j"))
+    
+    return(date_past)
+  }
+}
 
-season_list <- tibble(season = c("2017","2021"), 
-                      start = c("2017-01-01","2021-01-01"), 
-                      end = c("2017-06-11","2021-06-11"))
+
+
 
 
 season_date_list <- list()
 for(i in seq_along(season_list$season)){
   season <- season_list[i,]
+  season$start <- date_past(date_sel = season$end, days_past = 150)
    season_date_list[[i]] <- make_seasons(season)
 }
 
@@ -54,6 +81,8 @@ season_date <- bind_rows(season_date_list)
 
 
 ```
+
+
 
 ## Wrangle
 
@@ -70,17 +99,37 @@ training_data_clean<- training_data_raw %>% mutate(movement_time_sec = replace_n
  training_data_clean<- training_data_clean %>% mutate(day = lubridate::yday(date)) 
 ```
 
-
-### Join with season data
+## Create Season data
+### Join with season data 
 
 ```{r}
-training_data_clean<- training_data_clean %>% left_join(season_date, by = "date")
+training_data_season<- training_data_clean %>% right_join(season_date, by = "date")
+```
+
+### Clean
+```{r}
+training_data_season<- training_data_season %>% mutate(movement_time_sec = replace_na(movement_time_sec, 0),
+                                                   TSS = replace_na(TSS,0),
+                                                   IF = replace_na(IF,0)) 
 ```
 
 ```{r}
-training_data_clean %>% filter(!is.na(season)) %>% 
-            mutate(day = lubridate::yday(date)) %>%
-  ggplot(aes(x= day)) +
+
+
+#Calculate the day_nr of the season:
+
+training_data_season<- training_data_season %>% filter(!is.na(season)) %>%
+  group_by(season) %>% arrange(date) %>% 
+  mutate(day_season = rank(date, ties.method = "first"),
+         day_season = as.numeric(date) - lag(as.numeric(date)),
+         day_season = if_else(is.na(day_season),1,day_season),
+         day_season = cumsum(day_season)) %>% ungroup()
+```
+
+# Analyze
+```{r}
+training_data_season %>% filter(!is.na(season)) %>% 
+  ggplot(aes(x= day_season)) +
   geom_line(aes(y= ftp, color = "FTP"), size =1.3) +
   geom_line(aes(y= w_2mmol, color = "2 mmol"))+
   geom_line(aes(y= w_4mmol, color = "4 mmol"))+
@@ -91,11 +140,12 @@ training_data_clean %>% filter(!is.na(season)) %>%
 
 
 ```{r}
-training_data_clean %>% filter(!is.na(season)) %>% 
-  group_by(season) %>% arrange(date) %>%
+training_data_season %>% filter(!is.na(season)) %>% 
+  group_by(season) %>% arrange(day_season) %>%
    mutate(time_cum = cumsum(movement_time_sec)/(3600),
           TSS_cum = cumsum(TSS),
           IF_cum = cumsum(IF*movement_time_sec)) %>% 
+  mutate(ftp = last(ftp)) %>%
   ungroup() %>%
    mutate(time_cum_rel = time_cum / max(time_cum)*100,
           TSS_cum_rel = TSS_cum / max(TSS_cum)*100,
@@ -108,8 +158,8 @@ training_data_clean %>% filter(!is.na(season)) %>%
   
   filter(metric %in% c("time_cum_rel","TSS_cum_rel", "IF_cum_rel", "watt_mean", "hr_mean")) %>%
 
-  ggplot(aes(x= day)) +
-  geom_line(aes(y = value, color = season))+
+  ggplot(aes(x= day_season)) +
+  geom_line(aes(y = value, color = as.factor(ftp)))+
   facet_wrap(metric~., scales= "free")+
   labs(y = "Percent",
        x= "day of year")+
@@ -118,7 +168,7 @@ training_data_clean %>% filter(!is.na(season)) %>%
 
 
 ```{r}
-training_data_clean %>% filter(!is.na(season)) %>% 
+training_data_season %>% filter(!is.na(season)) %>% 
   group_by(season) %>% arrange(date) %>%
    mutate(time_cum = cumsum(movement_time_sec)/(3600),
           TSS_cum = cumsum(TSS),
@@ -135,7 +185,7 @@ training_data_clean %>% filter(!is.na(season)) %>%
   
   filter(metric %in% c("watt_mean", "hr_mean")) %>%
 
-  ggplot(aes(x= day)) +
+  ggplot(aes(x= day_season)) +
   geom_line(aes(y = value, color = season))+
   geom_smooth(aes(y=value, color = season))+
   facet_wrap(metric~., scales= "free")+
@@ -150,8 +200,8 @@ training_data_clean %>% ggplot()+geom_histogram(aes(IF))
 
 
 ```{r}
-training_data_clean %>% filter(!is.na(season)) %>% 
-  group_by(season) %>% arrange(date) %>%
+training_data_season %>% filter(!is.na(season)) %>% 
+  group_by(season) %>% arrange(day_season) %>%
    mutate(time_cum = cumsum(movement_time_sec)/(3600),
           TSS_cum = cumsum(TSS),
           IF_cum = cumsum(IF*movement_time_sec)) %>% 
@@ -164,7 +214,7 @@ training_data_clean %>% filter(!is.na(season)) %>%
   
 
 
-  ggplot(aes(x= day)) +
+  ggplot(aes(x= day_season)) +
   geom_point(aes(y = watt_mean, color = "watt_mean", size = IF_kat), alpha = 0.5)+
   geom_smooth(aes(y=watt_mean, color = "watt_mean"))+
     geom_point(aes(y = hr_mean, color = "hr_mean"))+
