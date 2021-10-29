@@ -1,0 +1,50 @@
+---
+title: "compare_seasons"
+author: "ari"
+date: "29 10 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+
+library(tidyverse)
+library(lubridate)
+```
+
+#Import data
+```{r}
+path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+
+training_data_season <-read_rds(str_c(path_laktat_ftp,"Results/season_data.rds"))
+```
+
+```{r}
+training_data_season %>% group_by(season) %>% 
+                              summarise(end_ftp = max(end_ftp),
+                                        date = max(date)) %>%
+  ggplot(aes(x=date))+
+  geom_line(aes(y=end_ftp))
+```
+
+Jump in 2017 ist sehr interessant. Ende März schon auf 282W. Januar war noch auf 260W. Wie ist das möglich?
+
+```{r}
+training_data_season %>% filter(#season %in% c("2017_Januar", "2017_Maerz", "2020_Juni","2021_April") &
+                                  day_season >100)%>%
+ggplot() +
+  geom_density(aes(x=NP, color =as.factor(end_ftp)))
+```
+
+```{r}
+training_data_season %>% filter(day_season >100)%>%
+ggplot() +
+  geom_density(aes(x=NP, color =as.factor(season)))+
+  facet_wrap(.~ end_ftp)+
+  geom_vline(xintercept = 220)
+```
