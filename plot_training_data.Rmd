@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
+library(lubridate)
 ```
 
 # Ideas
@@ -25,14 +26,28 @@ library(tidyverse)
 path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
 
 training_data_raw <- read_rds(str_c(path_laktat_ftp,"Results/aggregations_result.rds"))
+
+#=========================================================
+#read the season date csv (season_name, end_date of season, end_ftp of season)
+
+season_list <- read_csv2(str_c(path_laktat_ftp,"Season_date_ftp.csv"),
+                         col_types = list("c","c","d")) %>%
+                mutate(end_date=as.Date(end_date, "%d.%m.%Y"))
 ```
 
 ## Seasons
 
+```{r}
+season_list %>% ggplot(aes(x=end_date, y= end_ftp))+
+  geom_point()
+```
+
+
+
 Define the saeasons, Name and end date:
 ```{r}
-season_list <-   tibble(season = c("2016","2017","2019","2021_Feb","2021_Apr","2021_Okt"), 
-                      end = as.Date(c("2016-07-20","2017-05-22","2019-06-05","2021-02-26", "2021-04-21","2021-10-11")))
+#season_list <-   tibble(season = c("2016","2017","2019","2021_Feb","2021_Apr","2021_Okt"), 
+#                      end = as.Date(c("2016-07-20","2017-05-22","2019-06-05","2021-02-26", "2021-04-22","2021-10-11")))
 ```
 
 Calculate the sesaons and create  
@@ -43,9 +58,10 @@ table.
 make_seasons <- function(d){
   #create a sequence of dates out of start date and end date
   season_date <- tibble(date = seq.Date(as.Date(d$start),
-                                             as.Date(d$end), 
+                                             as.Date(d$end_date), 
                                              by = "day") ) %>%
-    mutate(season = d$season)
+    mutate(season = d$season,
+           end_ftp = d$end_ftp)
   return(season_date)
 }
 
@@ -73,7 +89,7 @@ date_past <- function(date_sel, days_past = 150){
 season_date_list <- list()
 for(i in seq_along(season_list$season)){
   season <- season_list[i,]
-  season$start <- date_past(date_sel = season$end, days_past = 150)
+  season$start <- date_past(date_sel = season$end_date, days_past = 150)
    season_date_list[[i]] <- make_seasons(season)
 }
 
@@ -145,7 +161,8 @@ training_data_season %>% filter(!is.na(season)) %>%
    mutate(time_cum = cumsum(movement_time_sec)/(3600),
           TSS_cum = cumsum(TSS),
           IF_cum = cumsum(IF*movement_time_sec)) %>% 
-  mutate(ftp = last(ftp)) %>%
+  mutate(#ftp = last(ftp),
+         season_name = str_c(end_ftp, "_", season)) %>%
   ungroup() %>%
    mutate(time_cum_rel = time_cum / max(time_cum)*100,
           TSS_cum_rel = TSS_cum / max(TSS_cum)*100,
@@ -159,12 +176,49 @@ training_data_season %>% filter(!is.na(season)) %>%
   filter(metric %in% c("time_cum_rel","TSS_cum_rel", "IF_cum_rel", "watt_mean", "hr_mean")) %>%
 
   ggplot(aes(x= day_season)) +
-  geom_line(aes(y = value, color = as.factor(ftp)))+
+  geom_line(aes(y = value, color = as.factor(season_name)))+
   facet_wrap(metric~., scales= "free")+
   labs(y = "Percent",
-       x= "day of year")+
+       x= "day of season")+
   theme_light()
 ```
+
+```{r}
+training_data_season %>% 
+  
+  filter(end_ftp > 264) %>%
+  mutate(end_ftp = case_when(end_ftp < 270 ~ 260,
+                              end_ftp < 280 ~ 270,
+                              TRUE ~ 280)) %>%
+  
+  filter(!is.na(season)) %>% 
+  group_by(season) %>% arrange(day_season) %>%
+   mutate(time_cum = cumsum(movement_time_sec)/(3600),
+          TSS_cum = cumsum(TSS),
+          IF_cum = cumsum(IF*movement_time_sec)) %>% 
+  mutate( season_name = str_c(end_ftp, "_", season)) %>%
+  ungroup() %>%
+   mutate(time_cum_rel = time_cum / max(time_cum)*100,
+          TSS_cum_rel = TSS_cum / max(TSS_cum)*100,
+          IF_cum_rel = IF_cum / max(IF_cum)*100) %>%
+  
+
+  ggplot(aes(x= movement_time_sec/3600)) +
+  geom_point(aes(y = TSS, color = as.factor(end_ftp)))+
+  geom_smooth(aes(y = TSS, color = as.factor(end_ftp)))+
+
+#  labs(y = "watt_mean",
+ #      x= "day of season")+
+  theme_light()
+```
+
+
+
+```{r}
+
+```
+
+
 
 
 ```{r}

@@ -71,8 +71,8 @@ count(files)
 # Only one day for testing 
 
 ```{r}
-start_date <- "2021-08-10"
-end_date <- "2021-10-20"
+start_date <- "2015-01-01"
+end_date <- "2022-01-01"
 
 
 date_selected <- tibble(file_date = seq.Date(as.Date(start_date),
@@ -395,7 +395,7 @@ laktat_watt_date
 
 
 ```{r import data and aggregate}
-override_data = TRUE  #If override_data = TRUE .. old aggregations will be overwritten, override_data = FALSE.. new date will be appended
+override_data = FALSE  #If override_data = TRUE .. old aggregations will be overwritten, override_data = FALSE.. new date will be appended
 
 if( override_data == FALSE){
 
