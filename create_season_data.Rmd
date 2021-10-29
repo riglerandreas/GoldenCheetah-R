@@ -1,0 +1,153 @@
+---
+title: "Create Season Data"
+author: "ari"
+date: "29 10 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Create Season data with the results from "Import_Data.Rmd" and a csv file called "Season_date_ftp.csv" which contains season name, end date of seson and the ftp at the end of the season.
+
+The season should end with a ftp-test.
+
+```{r}
+
+library(tidyverse)
+library(lubridate)
+```
+
+#Import data
+```{r}
+path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+training_data_raw <- read_rds(str_c(path_laktat_ftp,"Results/aggregations_result.rds"))
+
+#=========================================================
+#read the season date csv (season_name, end_date of season, end_ftp of season)
+
+season_list <- read_csv2(str_c(path_laktat_ftp,"Season_date_ftp.csv"),
+                         col_types = list("c","c","d")) %>%
+                mutate(end_date=as.Date(end_date, "%d.%m.%Y"))
+```
+
+## Seasons
+
+```{r}
+season_list %>% ggplot(aes(x=end_date, y= end_ftp))+
+  geom_point()
+```
+
+
+
+Calculate the sesaons and create  
+season_date  
+table.
+```{r}
+#================================Season functions==========================================
+make_seasons <- function(d){
+  #create a sequence of dates out of start date and end date
+  season_date <- tibble(date = seq.Date(as.Date(d$start),
+                                             as.Date(d$end_date), 
+                                             by = "day") ) %>%
+    mutate(season = d$season,
+           end_ftp = d$end_ftp)
+  return(season_date)
+}
+
+date_past <- function(date_sel, days_past = 150){ 
+  #Calculate the date days_past days before the date date_sel
+  daynr_past <- lubridate::yday(date_sel) -days_past
+  year_past = year(date_sel)
+  if(as.integer(daynr_past) < 0){
+    year_past = year_past - 1
+    daynr_past <- daynr_past +365
+    date_past <- as.Date(strptime(paste(year_past, daynr_past), format="%Y %j"))
+    
+    return(date_past)
+  }else{
+        date_past <- as.Date(strptime(paste(year_past, daynr_past), format="%Y %j"))
+    
+    return(date_past)
+  }
+}
+
+
+
+
+
+season_date_list <- list()
+for(i in seq_along(season_list$season)){
+  season <- season_list[i,]
+  season$start <- date_past(date_sel = season$end_date, days_past = 150)
+   season_date_list[[i]] <- make_seasons(season)
+}
+
+season_date <- bind_rows(season_date_list)
+```
+
+
+
+## Wrangle
+
+### Clean
+```{r}
+training_data_clean<- training_data_raw %>% mutate(movement_time_sec = replace_na(movement_time_sec, 0),
+                                                   TSS = replace_na(TSS,0),
+                                                   IF = replace_na(IF,0)) 
+```
+
+### Add some information
+
+```{r}
+ training_data_clean<- training_data_clean %>% mutate(day = lubridate::yday(date)) 
+```
+
+
+
+
+
+
+## Create Season data
+### Join with season data 
+
+```{r}
+training_data_season<- training_data_clean %>% right_join(season_date, by = "date")
+```
+
+### Clean
+```{r}
+training_data_season<- training_data_season %>% mutate(movement_time_sec = replace_na(movement_time_sec, 0),
+                                                   TSS = replace_na(TSS,0),
+                                                   IF = replace_na(IF,0)) 
+```
+
+```{r}
+
+
+#Calculate the day_nr of the season:
+
+training_data_season<- training_data_season %>% filter(!is.na(season)) %>%
+  group_by(season) %>% arrange(date) %>% 
+  mutate(day_season = rank(date, ties.method = "first"),
+         day_season = as.numeric(date) - lag(as.numeric(date)),
+         day_season = if_else(is.na(day_season),1,day_season),
+         day_season = cumsum(day_season)) %>% ungroup()
+```
+
+
+
+```{r}
+training_data_season %>% group_by(season) %>% summarise(from = min(date),
+                                               to = max(date),
+                                               ftp = max(end_ftp),
+                                               activities = n())
+```
+
+## Save
+```{r}
+training_data_season %>% write_rds(str_c(path_laktat_ftp,"Results/season_data.rds"))
+```
+
