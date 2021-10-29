@@ -71,8 +71,8 @@ count(files)
 # Only one day for testing 
 
 ```{r}
-start_date <- "2021-10-15"
-end_date <- "2021-10-25"
+start_date <- "2015-01-01"
+end_date <- "2022-01-01"
 
 
 date_selected <- tibble(file_date = seq.Date(as.Date(start_date),
@@ -149,6 +149,49 @@ calculate_cadence <- function(ridedata){
 }
 
 
+
+#===================TIME in ZONE==================================================
+
+#------------2mmol--------------------------------------------
+calculate_time_2mmol_w <- function(d,w_2mmol, w_min = 50){
+  #w_min ... time below this watt doesn't count
+  if (sum(names(d) =="WATTS") == 0| is.na(w_2mmol)) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(WATTS) %>% 
+            filter(WATTS <= w_2mmol &
+                   WATTS > w_min) %>%
+                  summarise(time_2mmol = n())
+    
+      return(d$time_2mmol)
+  }
+}
+
+#------------4mmol--------------------------------------------
+calculate_time_4mmol_w <- function(d,w_4mmol){
+  if (sum(names(d) =="WATTS") == 0| is.na(w_4mmol)) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(WATTS) %>% 
+            filter(WATTS >= w_4mmol) %>%
+                  summarise(time_4mmol = n())
+    
+      return(d$time_4mmol)
+  }
+}
+
+#------------below w_min--------------------------------------------
+calculate_time_below_w_min <- function(d, w_min = 50){
+  if (sum(names(d) =="WATTS") == 0) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(WATTS) %>% 
+            filter(WATTS <= w_min) %>%
+                  summarise(time_below_w_min = n())
+    
+      return(d$time_below_w_min)
+  }
+}
 
 
 
@@ -313,7 +356,9 @@ calculated with Lactate_Curve_FTP.rmd
 ```{r}
 laktat_watt_raw <- read_csv2(str_c(path_laktat_ftp,"laktat_watt.csv"))
 
-laktat_watt <- laktat_watt_raw %>% mutate(date = as.Date(datum, "%d.%m.%Y")) %>% select(-datum) %>% arrange(date)%>% mutate(date_max = lead(date) - 1,
+laktat_watt <- laktat_watt_raw %>% mutate(date = as.Date(datum, "%d.%m.%Y")) %>% select(-datum) %>% 
+                      arrange(date)%>% 
+              mutate(date_max = lead(date) - 1,
                     date_min = date,
                     date_max = if_else(is.na(date_max),Sys.Date(),date_max))
 
@@ -338,6 +383,11 @@ laktat_watt_date
 - calculate time < 2mmol watt
 - calculate time > 4mmol
 
+```{r}
+
+
+
+```
 
 
 ## Aggregation
@@ -345,7 +395,7 @@ laktat_watt_date
 
 
 ```{r import data and aggregate}
-override_data = TRUE  #If override_data = TRUE .. old aggregations will be overwritten, override_data = FALSE.. new date will be appended
+override_data = FALSE  #If override_data = TRUE .. old aggregations will be overwritten, override_data = FALSE.. new date will be appended
 
 if( override_data == FALSE){
 
@@ -391,6 +441,13 @@ for (i in seq_along(files_selected$file_name)){
                                          TSS = calculate_TSS(ridedata, FTP),
                                          watt_mean = calculate_w_mean(ridedata),
                                          hr_mean = calculate_hr_mean(ridedata),
+                                         
+                                         time_2mmol = calculate_time_2mmol_w(ridedata, aggregation_ride$w_2mmol,
+                                                                                       w_min = 50),
+                                         time_4mmol = calculate_time_4mmol_w(ridedata, aggregation_ride$w_4mmol),
+                                         time_below_w_min = calculate_time_below_w_min(ridedata,
+                                                                                       w_min = 50),
+                                         
                                          w_1min = calculate_best_watt(ridedata,min = 1),
                                          w_5min = calculate_best_watt(ridedata,min = 5),
                                          w_20min = calculate_best_watt(ridedata,min = 20),
@@ -440,22 +497,22 @@ if(!is_empty(aggregation_rides)){
 
 ```
 
-```{r}
-if((!(files_selected$file_name[4] %in% old_aggregations$file_name))){print("y")}
-
-
-```
 
 
 ```{r}
 
-aggregations_result %>% mutate(start_time = as.POSIXct(start_time)) %>% 
+aggregations_result %>% mutate(start_time = as.POSIXct(start_time),
+                               time_zone2 = movement_time_sec - time_2mmol - time_4mmol - time_below_w_min) %>% 
    ggplot(aes(x=start_time))+
-   geom_point(aes(y=hr_mean, color ="hr"))+
-   geom_point(aes(y=watt_mean))+
-  geom_line(aes(y=w_2mmol, color = "2mmol"))+
-   geom_line(aes(y= km, color = "km"))+
-  geom_line(aes(y= ftp, color = "FTP"))
+   #geom_point(aes(y=hr_mean, color ="hr"))+
+  geom_point(aes(y=time_2mmol/60, color ="time_2mmol"))+
+  geom_point(aes(y=time_below_w_min/60, color ="time_below"))+
+  geom_point(aes(y=time_4mmol/60, color ="time_4mmol"))+
+  geom_point(aes(y=time_zone2/60, color ="time_zone2"))
+#   geom_point(aes(y=watt_mean))+
+ # geom_line(aes(y=w_2mmol, color = "2mmol"))+
+  # geom_line(aes(y= km, color = "km"))+
+  #geom_line(aes(y= ftp, color = "FTP"))
 ```
 
 
