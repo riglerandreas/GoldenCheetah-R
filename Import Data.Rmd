@@ -536,7 +536,7 @@ if(!is_empty(aggregation_rides)){
   }
   
   #Save the result:
-  write_rds(aggregation_rides, str_c(path_laktat_ftp,file_name_aggreagations))
+  write_rds(aggregations_result, str_c(path_laktat_ftp,file_name_aggreagations))
   write_rds(watt_count_result, str_c(path_laktat_ftp, file_name_watt_count))
   write_rds(hr_count_result, str_c(path_laktat_ftp, file_name_hr_count))
 }
