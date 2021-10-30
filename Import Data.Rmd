@@ -325,6 +325,31 @@ calculate_best_w5 <- function(d){
   
   }
 }
+
+#================================== COUNT WATT and HR==============================
+
+count_watt <- function(d){ 
+    if(sum(names(d) =="WATTS") == 0){
+  return(tibble())
+    }else{
+  d<-d %>% mutate(watt= as.integer(WATTS)) %>% count(watt) 
+      return(d)
+  
+  }
+}
+
+count_hr <- function(d){ 
+    if(sum(names(d) =="WATTS") == 0){
+  return(tibble())
+    }else{
+  d<-d %>% mutate(hr= as.integer(HR)) %>% count(hr)
+      return(d)
+  
+  }
+}
+
+count_hr(ridedata)
+
 ```
 
 ## Import FTP data
@@ -380,14 +405,7 @@ laktat_watt_date
 
 
 # Hier weitermachen:
-- calculate time < 2mmol watt
-- calculate time > 4mmol
-
-```{r}
-
-
-
-```
+trainingsdaten als liste speichern count(watt, hr)
 
 
 ## Aggregation
@@ -395,17 +413,27 @@ laktat_watt_date
 
 
 ```{r import data and aggregate}
-override_data = FALSE  #If override_data = TRUE .. old aggregations will be overwritten, override_data = FALSE.. new date will be appended
+override_data = TRUE  #If override_data = TRUE .. old aggregations will be overwritten, override_data = FALSE.. new date will be appended
+
+file_name_aggreagations <- "Results/aggregations_result_counts.rds"
+file_name_watt_count <- "Results/watt_count_result.rds"
+file_name_hr_count <- "Results/hr_count_result.rds"
+
 
 if( override_data == FALSE){
-
- old_aggregations <- read_rds(str_c(path_laktat_ftp,"Results/aggregations_result.rds"))
+  #Load allready processed data
+ old_aggregations <- read_rds(str_c(path_laktat_ftp, file_name_aggreagations))
+ old_hr_watt <- read_rds(str_c(path_laktat_ftp, file_name_watt_count))
+ old_hr_count <- read_rds(str_c(path_laktat_ftp, file_name_hr_count))
+ 
 }else{old_aggregations <- tibble(file_name = c(" "))}
 
 
 data_ride <- list()
 data_rides <- list()
 aggregation_rides <- list()
+watt_count_rides <- list()
+hr_count_rides <- list()
 aggregation_ride <- tibble()
 for (i in seq_along(files_selected$file_name)){
   if((!(files_selected$file_name[i] %in% old_aggregations$file_name))){
@@ -421,6 +449,9 @@ for (i in seq_along(files_selected$file_name)){
            #connect to the FTP date data
            aggregation_ride <- aggregation_ride %>% left_join(date_ftp, by ="date")
            FTP <- aggregation_ride$ftp
+           
+           #date for count of hr and watt
+           date_ride <- aggregation_ride %>% summarise(max(date,na.rm = TRUE)) %>% pull()
            
            #connect to the laktat watt data
            aggregation_ride <- aggregation_ride %>% left_join(laktat_watt_date, by ="date")
@@ -455,7 +486,11 @@ for (i in seq_along(files_selected$file_name)){
                   
                   aggregation_ride$km <-ridedata%>% summarise(km = max(KM,na.rm = TRUE)) %>% pull()
                   
-                                  # check for overrides               
+              #Count Watt and Hr per ride
+                  watt_count <- count_watt(ridedata) 
+                  hr_count <- count_hr(ridedata)
+                  
+              #check for overrides               
                   override <- data_ride$RIDE$OVERRIDES
                   if(is.null(override) == FALSE){
                      for (i_ov in seq_along(override)){
@@ -474,9 +509,16 @@ for (i in seq_along(files_selected$file_name)){
   
                   
                   aggregation_ride <- aggregation_ride %>% bind_cols(aggregations)
-           }
+           }else{watt_count <- tibble()}
       })
+     
     aggregation_rides[[i]] <- aggregation_ride
+    
+    watt_count_rides[[i]] <- watt_count %>% mutate(file_name = files_selected$file_name[i],
+                                                   date = date_ride)
+    hr_count_rides[[i]] <- hr_count %>% mutate(file_name = files_selected$file_name[i],
+                                                   date = date_ride)
+    
     print(datei)
   }
 }
@@ -485,17 +527,23 @@ if(!is_empty(aggregation_rides)){
   
   aggregations_result <- bind_rows(aggregation_rides) %>% mutate(start_time = as.POSIXct(start_time))
   
+  watt_count_result <- bind_rows(watt_count_rides)
+  hr_count_result <- bind_rows(hr_count_rides)
+  
   if(override_data == FALSE){ 
     #if no update append the new data to the old data:
       aggregations_result <- aggregations_result %>% bind_rows(old_aggregations)
   }
   
   #Save the result:
-  write_rds(aggregations_result, str_c(path_laktat_ftp,"Results/aggregations_result.rds"))
+  write_rds(aggregations_result, str_c(path_laktat_ftp,file_name_aggreagations))
+  write_rds(watt_count_result, str_c(path_laktat_ftp, file_name_watt_count))
+  write_rds(hr_count_result, str_c(path_laktat_ftp, file_name_hr_count))
 }
 
 
 ```
+
 
 
 
