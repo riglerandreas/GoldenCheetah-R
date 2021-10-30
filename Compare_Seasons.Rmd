@@ -42,6 +42,18 @@ ggplot() +
 ```
 
 ```{r}
+training_data_season %>% filter(day_season >50)%>%
+  group_by(season) %>% summarise(movement_time_sec = sum(movement_time_sec, na.rm = TRUE),
+                                 time_2mmol = sum(time_2mmol,na.rm= TRUE),
+                                 time_4mmol = sum(time_4mmol,na.rm= TRUE),
+                                 end_ftp = max(end_ftp)) %>% 
+                          mutate(time_between = movement_time_sec - time_2mmol - time_4mmol) %>% arrange(end_ftp)
+  
+ggplot() +
+  geom_density(aes(x=time_2mmol, color =as.factor(end_ftp)))
+```
+
+```{r}
 training_data_season %>% filter(day_season >100)%>%
 ggplot() +
   geom_density(aes(x=NP, color =as.factor(season)))+
