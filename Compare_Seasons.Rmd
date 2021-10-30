@@ -21,8 +21,35 @@ library(lubridate)
 path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
 
 
-training_data_season <-read_rds(str_c(path_laktat_ftp,"Results/season_data.rds"))
+training_data_season <-read_rds(str_c(path_laktat_ftp,"Results/season_data_count.rds"))
+
+training_watt_count_season <- read_rds(str_c(path_laktat_ftp,"Results/season_watt_count.rds"))
+training_hr_count_season <- read_rds(str_c(path_laktat_ftp,"Results/season_hr_count.rds"))
 ```
+
+## Hier weitermachen:
+- warum gibt es diese ausreißer?
+- gibt es zusammenhänge
+- relative zahlen machen
+- mit ftp verbinden ( rel zu anfangs ftp oder ftp zu diesem zeitpunkt als referenz verwenden)
+- X TAGE der season filtern siehe season 2021 - kann fast nicht sein? --> herausfinden wo relevanter bereich liegt
+- z.B: Kennzahlen z.B. Zonen -> verädnerung über Monate
+
+```{r}
+watt_count_season <- training_watt_count_season %>% group_by(season,end_ftp, watt) %>% 
+                            summarise(n = sum(n, na.rm = TRUE)) %>%
+                                arrange(watt) #%>%
+                                    #mutate(n = if_else(n-lag(n)> 1000L, (lag(n)+lead(n))/2,n))
+
+watt_count_season %>% 
+  filter(watt %in% c(50:350) &
+           n < 10000 &
+           str_detect(season, "2021")) %>%
+  ggplot() +
+  geom_point(aes(x=watt, y = n,color =as.factor(end_ftp)),stat="identity")
+```
+
+
 
 ```{r}
 training_data_season %>% group_by(season) %>% 

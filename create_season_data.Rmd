@@ -21,9 +21,16 @@ library(lubridate)
 
 #Import data
 ```{r}
+
+file_name_aggreagations <- "Results/aggregations_result_counts.rds"
+file_name_watt_count <- "Results/watt_count_result.rds"
+file_name_hr_count <- "Results/hr_count_result.rds"
+
 path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
 
-training_data_raw <- read_rds(str_c(path_laktat_ftp,"Results/aggregations_result.rds"))
+training_data_raw <- read_rds(str_c(path_laktat_ftp, file_name_aggreagations))
+training_watt_count_raw <- read_rds(str_c(path_laktat_ftp, file_name_watt_count))
+training_hr_count_raw <- read_rds(str_c(path_laktat_ftp, file_name_hr_count))
 
 #=========================================================
 #read the season date csv (season_name, end_date of season, end_ftp of season)
@@ -115,6 +122,9 @@ training_data_clean<- training_data_raw %>% mutate(movement_time_sec = replace_n
 
 ```{r}
 training_data_season<- training_data_clean %>% right_join(season_date, by = "date")
+
+training_watt_count_season<- training_watt_count_raw %>% right_join(season_date, by = "date")
+training_hr_count_season<- training_hr_count_raw %>% right_join(season_date, by = "date")
 ```
 
 ### Clean
@@ -129,12 +139,21 @@ training_data_season<- training_data_season %>% mutate(movement_time_sec = repla
 
 #Calculate the day_nr of the season:
 
-training_data_season<- training_data_season %>% filter(!is.na(season)) %>%
-  group_by(season) %>% arrange(date) %>% 
-  mutate(day_season = rank(date, ties.method = "first"),
-         day_season = as.numeric(date) - lag(as.numeric(date)),
-         day_season = if_else(is.na(day_season),1,day_season),
-         day_season = cumsum(day_season)) %>% ungroup()
+calulate_day_nr <- function(d){
+
+    d<- d %>% filter(!is.na(season)) %>%
+      group_by(season) %>% arrange(date) %>% 
+      mutate(day_season = rank(date, ties.method = "first"),
+             day_season = as.numeric(date) - lag(as.numeric(date)),
+             day_season = if_else(is.na(day_season),1,day_season),
+             day_season = cumsum(day_season)) %>% ungroup()
+    return(d)
+}
+
+training_data_season <- calulate_day_nr(training_data_season)
+
+training_watt_count_season <- calulate_day_nr(training_watt_count_season)
+training_hr_count_season <- calulate_day_nr(training_hr_count_season)
 ```
 
 
@@ -148,6 +167,8 @@ training_data_season %>% group_by(season) %>% summarise(from = min(date),
 
 ## Save
 ```{r}
-training_data_season %>% write_rds(str_c(path_laktat_ftp,"Results/season_data.rds"))
+training_data_season %>% write_rds(str_c(path_laktat_ftp,"Results/season_data_count.rds"))
+training_watt_count_season %>% write_rds(str_c(path_laktat_ftp,"Results/season_watt_count.rds"))
+training_hr_count_season %>% write_rds(str_c(path_laktat_ftp,"Results/season_hr_count.rds"))
 ```
 
