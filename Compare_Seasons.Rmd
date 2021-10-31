@@ -28,16 +28,26 @@ training_hr_count_season <- read_rds(str_c(path_laktat_ftp,"Results/season_hr_co
 ```
 
 ## Hier weitermachen:
-- warum gibt es diese ausreißer?
+outliers are ok - most time ergometer workouts with a fixed watt value
+
 - gibt es zusammenhänge
 - relative zahlen machen
 - mit ftp verbinden ( rel zu anfangs ftp oder ftp zu diesem zeitpunkt als referenz verwenden)
 - X TAGE der season filtern siehe season 2021 - kann fast nicht sein? --> herausfinden wo relevanter bereich liegt
 - z.B: Kennzahlen z.B. Zonen -> verädnerung über Monate
 
+- problem laufeinheiten und einheiten ohne watt - zählen nicht mitt -> inkludieren!
+- diemension der gesamtzeit noch miteinfließen lassen
+
 ```{r}
-watt_count_season <- training_watt_count_season %>% group_by(season,end_ftp, watt) %>% 
-                            summarise(n = sum(n, na.rm = TRUE)) %>%
+watt_count_season <- training_watt_count_season %>% 
+                          group_by(season,end_ftp) %>%
+                              mutate(n_total = sum(n, na.rm = TRUE)) %>% 
+                          group_by(season,end_ftp, watt) %>%
+                            summarise(n = sum(n, na.rm = TRUE),
+                                      n_total = mean(n_total, na.rm = TRUE)) %>%
+                              mutate(n_rel = n/n_total,
+                                     time_below_200 ) %>%
                                 arrange(watt) #%>%
                                     #mutate(n = if_else(n-lag(n)> 1000L, (lag(n)+lead(n))/2,n))
 
@@ -49,6 +59,85 @@ watt_count_season %>%
   geom_point(aes(x=watt, y = n,color =as.factor(end_ftp)),stat="identity")
 ```
 
+### training zones
+
+```{r}
+zones <- tibble(name= factor(c("GA1","Tempo","SST", "Schwelle + VO2max"), levels= c("GA1","Tempo","SST", "Schwelle + VO2max")),
+                lower = c(0, 0.7 ,0.8, 1),
+                upper = c(0.7, 0.8 ,1, 10))
+
+zones 
+```
+
+```{r}
+training_season_zones<- training_watt_count_season %>% mutate(zone = factor(c(""))) %>% 
+                            left_join(training_data_season, by= c("file_name", "season","date", "end_ftp", "day_season"))
+
+
+for (i in seq_along(zones$name)) {
+zone_name <- zones[i,"name"] %>% pull()
+training_season_zones<- training_season_zones %>% mutate(zone = if_else(watt > as.integer(zones[i,"lower"]* ftp)  &
+                                                       watt < as.integer(zones[i,"upper"]* ftp),
+                                                       zone_name,
+                                                       zone))
+}
+```
+
+
+```{r}
+
+#when two seasons have the same end_Ftp
+training_season_zones %>% group_by(end_ftp) %>%  
+                              mutate(rang = min_rank(season),
+                                     end_ftp = if_else(rang>1, end_ftp+1, end_ftp)) %>%
+
+
+                        filter(day_season >100 &
+                                   watt != 0) %>% 
+  group_by(season,end_ftp) %>%
+                              mutate(n_total = sum(n, na.rm = TRUE)) %>% 
+                          group_by(season,end_ftp, zone) %>%
+                            summarise(n = sum(n, na.rm = TRUE),
+                                      n_total = mean(n_total, na.rm = TRUE)) %>%
+                              mutate(n_rel = n/n_total ) %>%
+  ggplot()+
+  #geom_col(aes(x= zone, y = n_rel,fill = zone), position = "dodge")+
+  geom_col(aes(x= end_ftp, y = n_rel,fill = reorder(zone, desc(zone))))+
+  #facet_wrap(.~season)+
+  scale_fill_manual(values= c("GA1" = "green3", "Tempo" = "deepskyblue", "SST" = "pink1", "Schwelle + VO2max" = "firebrick" ))+
+  theme_light()
+
+
+training_season_zones %>% group_by(end_ftp) %>%  mutate(rang = min_rank(season),
+                                                        end_ftp = if_else(rang>1, end_ftp+1, end_ftp)) 
+```
+
+
+### Asureißer
+```{r}
+watt_count_season <- training_watt_count_season %>% group_by(season,end_ftp, watt) %>% 
+                            summarise(n = sum(n, na.rm = TRUE)) %>%
+                                arrange(watt) #%>%
+                                    #mutate(n = if_else(n-lag(n)> 1000L, (lag(n)+lead(n))/2,n))
+
+
+training_watt_count_season %>% 
+  filter(n > 1000 & watt != 0) %>% select(watt, n, everything())
+ 
+
+training_watt_count_season %>% arrange(desc(n))
+```
+
+```{r}
+training_watt_count_season %>% left_join(training_data_season, by= "file_name")%>% 
+  filter(n > 500 & 
+         n < 1000 & watt != 0) %>% select(workout_code, device,watt, n, everything())
+```
+
+
+```{r}
+training_data_season %>% filter(file_name == "2016_02_23_17_30_47.json")
+```
 
 
 ```{r}
