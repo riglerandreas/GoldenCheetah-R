@@ -39,25 +39,63 @@ outliers are ok - most time ergometer workouts with a fixed watt value
 - problem laufeinheiten und einheiten ohne watt - zählen nicht mitt -> inkludieren!
 - diemension der gesamtzeit noch miteinfließen lassen
 
+
+- modell für hrv/watt erzeugen -> predict für 180w --> zeitlichen verlauf erkennen (übertraining oder fitnesssteigerung)
+
+
+
 ```{r}
-watt_count_season <- training_watt_count_season %>% 
+watt_count_season <- training_watt_count_season %>%
                           group_by(season,end_ftp) %>%
                               mutate(n_total = sum(n, na.rm = TRUE)) %>% 
                           group_by(season,end_ftp, watt) %>%
                             summarise(n = sum(n, na.rm = TRUE),
                                       n_total = mean(n_total, na.rm = TRUE)) %>%
                               mutate(n_rel = n/n_total,
-                                     time_below_200 ) %>%
+                                     watt_rel = watt/ end_ftp) %>%
                                 arrange(watt) #%>%
                                     #mutate(n = if_else(n-lag(n)> 1000L, (lag(n)+lead(n))/2,n))
+```
 
+
+```{r}
 watt_count_season %>% 
   filter(watt %in% c(50:350) &
-           n < 10000 &
-           str_detect(season, "2021")) %>%
+           n < 10000 #&
+         #  str_detect(season, "2021")
+         ) %>%
   ggplot() +
   geom_point(aes(x=watt, y = n,color =as.factor(end_ftp)),stat="identity")
 ```
+
+```{r}
+watt_count_season %>% 
+  filter(watt %in% c(50:350) &
+           n < 10000 #&
+         #  str_detect(season, "2021")
+         ) %>%
+  ggplot() +
+  geom_point(aes(x=watt_rel, y = n_rel,color =as.factor(season)),stat="identity")+
+  geom_vline(xintercept = 0.86)+
+  facet_wrap(end_ftp~.)
+```
+
+```{r}
+watt_count_season %>% 
+  filter(watt %in% c(50:350) &
+           n < 10000 #&
+         #  str_detect(season, "2021")
+         ) %>%
+  mutate(watt_rel_bin = cut(watt_rel, breaks = c(0, 0.7,0.9,2))) %>%
+  group_by(season, end_ftp, watt_rel_bin) %>%
+  summarise(n_rel=sum(n_rel)) %>%
+  ggplot() +
+  #geom_bar(aes(x=cut_interval(watt_rel, 4), y = n_rel,fill =as.factor(season)),stat="identity", position = "dodge")+
+  geom_bar(aes(x=watt_rel_bin, y = n_rel,fill =as.factor(season)),stat="identity", position = "dodge")+
+  facet_wrap(end_ftp~.)+
+  labs(x = "watt / end_ftp")
+```
+
 
 ### training zones
 
