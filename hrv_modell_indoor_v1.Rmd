@@ -1,0 +1,744 @@
+---
+title: "hrv_modell_indoor"
+author: "ari"
+date: "20 11 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Data from hrv_modell.Rmd (data_prep )
+
+Idee:
+Indoor ist sehr kontrollierte trainingsumgebung
+umegebungsvariablen aber auch der konstante belastungsbereich
+
+nur indoorwerte verwenden
+versuchen in einem bestimmten zeitbereich ein modell zu trainieren und mit dem die aktuelle zu bewerten
+
+1. daten für modell auswählen
+wichtig wäre sainson mit vielen trainignsdaten im indoorbereich
+
+
+2. möglichst genaues modell erzeugen
+dazu wichtig brauche bare features herausfinden (mittelwerte, lag, ...)
+fragestellung:
+  was ist für hr wesentlich?
+    - watt aktuell
+    - wie lange schon gefahren
+    - hr erholt sich / passt sich relativ langsam an --> ev. werte von vor 3, 2 ,1 minute
+    - es sollten keine hr werte verwendet werden --> ziel ist aus watt und umgebungsvariablen(zeit,..) 
+      die hr zu bestimmen 
+    
+    
+-- correlationsplot dürfte die hr vor 3minuten wichtig sein
+vielleicht correlation hr zu verschiedenen lag werten plotten (hr und watt)
+
+
+3. mit anderen saisonen vergleich
+
+4. wenn funktionier weitere schritte
+wie z.b. modell auf outdoor ausweiten
+oder kontinuierlich trainieren bzw.aktuelle form abschätzen
+
+
+## Verbesserungsvorschläge:
+- watt_3m wichtigster wert, vielleicht wichtig typische intervallängen abzubilden? (3min 5min 10min 20min 40min 50min)
+- vielleicht rohdaten feiner gestallten - 30sekunden mittlwerte?
+- aber vielleicht auch nur auf 1-2 monate konzentrieren --> kommende monate predicten (siehe ganz unten)
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(GGally)
+library(zoo) #rollmean
+```
+
+# Data
+## Select season
+```{r}
+path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/Results/"
+data_aggreg<- read_rds(str_c(path_laktat_ftp,"aggregations_result.rds"))
+data_aggreg <- data_aggreg %>% mutate(year = lubridate::year(date))
+data_aggreg  %>% count(year,device) %>% filter(device== "P2MIndoor ")
+```
+
+```{r}
+data_aggreg %>% filter(device == "P2MIndoor " ) %>%
+
+                         group_by(year) %>%
+  arrange(date) %>%
+                            mutate(n=1,
+                                   n= cumsum(n)) %>%
+  
+                         filter(year %in% c(2016:2018)) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=n))
+```
+
+```{r}
+data_aggreg %>% filter(device == "P2MIndoor " &
+                         date > as.Date("2016-11-01") &
+                         date < as.Date("2017-07-07")) %>%
+
+
+  arrange(date) %>%
+                            mutate(n=1,
+                                   n= cumsum(n)) %>%
+  
+                         filter(year %in% c(2016:2018)) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=n))
+```
+## 2017
+
+
+```{r}
+data_2017_raw<- read_rds( "Results/test_ml_data_2017.rds")
+
+data_2017 <- data_2017_raw %>% filter(str_detect(device,"P2MIn") &
+                                        date < as.Date("2017-06-01")&
+                                        hr > 50 &
+                                        hr <200 &
+                                        watt > 0) %>%
+                                        rename("minute" = "sec_bin")
+data_2017 %>% head()
+```
+
+
+# Analyze
+
+```{r}
+data_2017 %>% count(date,workout_code) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=n))
+```
+
+
+```{r}
+data_2017 %>% group_by(workout_code,date,device,file_name, hour, minute) %>% 
+                summarise(watt = as.integer(mean(watt)),
+                          hr = as.integer(mean(hr))) %>%
+  mutate(minutes_10 = minute %/% 10) %>%
+
+  
+  ggplot()+
+  geom_point(aes(x=watt, y = hr, color = hour), alpha = 1/10)+
+  facet_wrap(minutes_10~.)
+```
+```{r}
+data_2017_minute <-  data_2017 %>% group_by(workout_code,date,device,file_name, hour, minute) %>% 
+                summarise(watt = as.integer(mean(watt)),
+                          hr = as.integer(mean(hr))) %>%
+  mutate(minutes_10 = minute %/% 10,
+         cat= ifelse(str_detect(workout_code,"GA1"),"GA1","ELSE"))
+```
+
+
+```{r}
+data_2017_minute%>%
+
+  
+  ggplot()+
+  geom_point(aes(x=watt, y = hr, color = cat), alpha = 1/10)+
+  facet_wrap(minutes_10~.)
+```
+
+```{r}
+data_ggall<- data_2017_minute  %>%
+  group_by(file_name) %>%
+  arrange(minute) %>%
+      mutate(watt_3 = lag(watt,3),
+             hr_3 = lag(hr,3),
+             hr_5 = lag(hr,5),
+             hr_10 = lag(hr,10)) %>%
+  ungroup() %>%
+  select(watt, hr, minutes_10, minute,hour,
+         watt_3, hr_3, hr_5, hr_10)
+
+ggcorr(data_ggall, detail = TRUE, label = TRUE, angle = 90)
+```
+
+```{r}
+ma <- function(x, n = 3){stats::filter(x, rep(1 / n, n), sides = 2)}
+
+
+ggall_watt<- data_2017_minute  %>%
+  group_by(file_name) %>%
+  arrange(minute) %>%
+      mutate(watt_3 = lag(watt,3),
+             watt_5 = lag(watt,5),
+             watt_10 = lag(watt,10),
+             watt_m3 = (lag(watt,1)+lag(watt,2)+lag(watt,3))/3,
+             watt_m5 = (lag(watt,1)+lag(watt,2)+lag(watt,3)+lag(watt,4)+lag(watt,5))/5) %>%
+  ungroup() %>%
+  select(watt, watt_m3,watt_m5,hr, minutes_10, minute,hour,
+         watt_3, watt_5, watt_10)
+
+ggcorr(ggall_watt, detail = TRUE, label = TRUE, angle = 90)
+```
+
+
+# Model
+
+## Trainings Test split
+```{r}
+
+data_model <-  data_2017_minute %>% #select(hr,watt, file_name)
+                        group_by(file_name) %>%
+                        arrange(minute) %>%
+                            mutate( hr_3 = lag(hr,3),
+                                   hr_5 = lag(hr,5),
+                                   hr_10 = lag(hr,10)) %>%
+      mutate(watt_mean= cummean(watt),
+             watt_3 = lag(watt,3,default = 0),
+             watt_5 = lag(watt,5,default = 0),
+             watt_10 = lag(watt,10,default = 0),
+             watt_m3 = (lag(watt,1,default = 0)+lag(watt,2,default = 0)+lag(watt,3,default = 0))/3,
+             watt_m5 = (lag(watt,1,default = 0)+lag(watt,2,default = 0)+
+                          lag(watt,3,default = 0)+lag(watt,4,default = 0)+lag(watt,5,default = 0))/5,
+             watt_m10 = ((lag(watt,6,default = 0)+lag(watt,7,default = 0)+
+                          lag(watt,8,default = 0)+lag(watt,9,default = 0)+lag(watt,10,default = 0))/5 + watt_m5)/2)%>%
+                        ungroup()
+
+files_all <- data_model %>% ungroup() %>%distinct(file_name) %>% select(file_name)
+
+set.seed(1353)
+files_split <- initial_split(files_all)
+
+
+train_files <- training(files_split)
+test_files <- testing(files_split)
+
+train_data <- train_files %>% left_join(data_model,by = "file_name")
+test_data <- test_files %>% left_join(data_model,by = "file_name")
+
+#für final model:
+data_model_split <- initial_split(data_model)
+
+
+files_all
+```
+
+## Model 1
+### CREATE RECIPE AND ROLES 
+
+
+```{r}
+#model <- rand_forest(mode = "regression") %>%
+ # set_engine("ranger")
+
+cores <- parallel::detectCores()
+cores
+
+model <- rand_forest( trees = 1000) %>% 
+  set_engine("ranger", num.threads = cores) %>% 
+  set_mode("regression")
+
+#model <-  linear_reg(mode = "regression") %>%
+ # set_engine("lm") 
+
+workflow <- workflow() %>%
+  add_model(model)
+
+lock_rec<-  recipe(hr ~ ., data = train_data) %>% 
+  #step_naomit(everything()) %>%
+  update_role(everything(), -hr,new_role = "ID") %>%
+  update_role(watt,watt_m3,watt_m5, minute, new_role = "predictor")%>%
+  step_naomit(watt_m5)
+  
+  #update_role(workout_code, date, device, fule_name, date, new_role = "ID")
+
+workflow <- add_recipe(workflow, lock_rec)
+```
+
+### Fit
+```{r}
+#library(rstanarm)
+#options(mc.cores = parallel::detectCores())
+
+fit_workflow <- fit(workflow, train_data )
+
+
+```
+
+### Analyze Result
+
+```{r}
+result_train <- train_data %>%
+                  bind_cols(
+                    predict(fit_workflow, new_data = train_data ) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "train")
+result_test <- test_data %>%
+                  bind_cols(
+                    predict(fit_workflow, new_data = test_data) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+
+result_all <- result_train %>% bind_rows(result_test)
+
+
+```
+
+```{r}
+result_all %>% ggplot(aes(x= hr_pred))+
+  geom_point(aes(y=hr, color =date))+
+  facet_wrap(set~.)
+```
+
+```{r}
+
+rmse(result_train, hr, hr_pred) %>% mutate(data = "train") %>%
+  bind_rows(rmse(result_test, hr, hr_pred) %>% mutate(data = "test")) %>%
+  select(data, everything())
+```
+
+
+```{r}
+result_all %>% group_by(file_name,date) %>% mutate(error = hr_pred - hr) %>%
+  summarise(error_min = min(error),
+            error_mean = mean(error),
+            error_abs_mean = mean(abs(error)),
+            error_max = max(error)) %>%
+  ggplot(aes(x=date)) +
+  geom_point(aes(y=error_abs_mean, color = "mean"))+
+  geom_point(aes(y=error_min,color = "min"))+
+  geom_point(aes(y=error_max,color = "max"))
+  
+ 
+```
+
+## Model 2
+### CREATE RECIPE AND ROLES 
+
+
+```{r}
+#model <- rand_forest(mode = "regression") %>%
+ # set_engine("ranger")
+
+cores <- parallel::detectCores()
+cores
+
+model <- rand_forest( trees = 1000) %>% 
+  set_engine("ranger", num.threads = cores) %>% 
+  set_mode("regression")
+
+#model <-  linear_reg(mode = "regression") %>%
+ # set_engine("lm") 
+
+workflow2 <- workflow() %>%
+  add_model(model)
+
+lock_rec<-  recipe(hr ~ ., data = train_data) %>% 
+  #step_naomit(everything()) %>%
+  update_role(everything(), -hr,new_role = "ID") %>%
+  update_role(watt,watt_m3,watt_m5,minute, watt_mean, new_role = "predictor")%>%
+  step_naomit(watt_m5)
+  
+  #update_role(workout_code, date, device, fule_name, date, new_role = "ID")
+
+workflow2 <- add_recipe(workflow2, lock_rec)
+```
+
+```{r}
+train_data %>% select(file_name, minute, watt, watt_mean)
+```
+
+
+### Fit
+```{r}
+#library(rstanarm)
+#options(mc.cores = parallel::detectCores())
+
+fit_workflow2 <- fit(workflow2, train_data )
+
+
+```
+
+### Analyze Result
+
+```{r}
+result_train2 <- train_data %>%
+                  bind_cols(
+                    predict(fit_workflow2, new_data = train_data ) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "train")
+result_test2 <- test_data %>%
+                  bind_cols(
+                    predict(fit_workflow2, new_data = test_data) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+
+result_all2 <- result_train2 %>% bind_rows(result_test2)
+
+
+```
+
+```{r}
+result_all2 %>% ggplot(aes(x= hr_pred))+
+  geom_point(aes(y=hr))+
+  facet_wrap(set~.)
+```
+
+```{r}
+
+rmse(result_train2, hr, hr_pred) %>% mutate(data = "train") %>%
+  bind_rows(rmse(result_test2, hr, hr_pred) %>% mutate(data = "test")) %>%
+  select(data, everything())
+```
+
+## Model 3
+### CREATE RECIPE AND ROLES 
+
+
+```{r}
+#model <- rand_forest(mode = "regression") %>%
+ # set_engine("ranger")
+
+cores <- parallel::detectCores()
+cores
+
+model <- rand_forest( trees = 1000) %>% 
+  set_engine("ranger", num.threads = cores) %>% 
+  set_mode("regression")
+
+#model <-  linear_reg(mode = "regression") %>%
+ # set_engine("lm") 
+
+workflow3 <- workflow() %>%
+  add_model(model)
+
+lock_rec<-  recipe(hr ~ ., data = train_data) %>% 
+  #step_naomit(everything()) %>%
+  update_role(everything(), -hr,new_role = "ID") %>%
+  update_role(watt, watt_m3, watt_m5, minute, watt_mean, watt_m5, new_role = "predictor")%>%
+  step_naomit(watt_m5)
+  
+  #update_role(workout_code, date, device, fule_name, date, new_role = "ID")
+
+workflow3 <- add_recipe(workflow3, lock_rec)
+```
+
+
+
+### Fit
+```{r}
+#library(rstanarm)
+#options(mc.cores = parallel::detectCores())
+
+fit_workflow3 <- fit(workflow3, train_data )
+
+
+```
+
+### Analyze Result
+
+```{r}
+result_train3 <- train_data %>%
+                  bind_cols(
+                    predict(fit_workflow3, new_data = train_data ) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "train")
+result_test3 <- test_data %>%
+                  bind_cols(
+                    predict(fit_workflow3, new_data = test_data) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+
+result_all3 <- result_train3 %>% bind_rows(result_test3)
+
+
+```
+
+```{r}
+result_all3 %>% ggplot(aes(x= hr_pred))+
+  geom_point(aes(y=hr))+
+  facet_wrap(set~.)
+```
+
+```{r}
+
+rmse(result_train3, hr, hr_pred) %>% mutate(data = "train") %>%
+  bind_rows(rmse(result_test3, hr, hr_pred) %>% mutate(data = "test")) %>%
+  select(data, everything())
+
+
+```
+
+
+```{r}
+files <- c("2017_04_16_17_36_55.json", "2017_02_04_19_00_35.json", "2017_02_06_19_37_45.json", "2017_02_28_19_32_26.json")
+result_train3 %>% filter(str_detect(workout_code,"SST")) %>%count(file_name) %>% arrange(desc(n))
+
+
+result_test3 %>% filter(!str_detect(workout_code,"SST")) %>%
+                    count(file_name) %>% arrange(desc(n))
+files_test <- c("2017_02_13_19_13_13.json", "2017_03_15_19_06_28.json", "2017_01_02_15_20_44.json")
+
+```
+
+```{r}
+result_train3 %>% filter(file_name %in% files) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of model training data",
+       colour = "")+
+  theme_light()
+```
+
+```{r}
+result_test3 %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ date)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+Overfitting?
+
+```{r}
+result_test3 %>% count(date)
+
+
+```
+```{r}
+result_test3 %>% filter(date  <as.Date("2017-01-15") | date  >as.Date("2017-03-15")) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ date)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+```{r}
+result_test3 %>%# filter(date  <as.Date("2017-01-15") | date  >as.Date("2017-03-15")) %>%
+  mutate(error = hr-hr_pred) %>%
+  group_by(file_name,workout_code,date) %>% summarise(error = mean(error)) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=error))
+
+  ggplot(aes(x=minute))+
+  #geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=error, color ="error"))+
+  geom_line(aes(y=watt/10, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ date)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+
+## Model 4 resampling
+
+
+### CREATE RECIPE AND ROLES 
+
+
+
+
+
+```{r}
+#model <- rand_forest(mode = "regression") %>%
+ # set_engine("ranger")
+
+cores <- parallel::detectCores()
+cores
+
+model <- rand_forest( trees =  tune(),
+                      mtry = tune(),
+                      min_n = 3) %>%  #zuvor trainiert 
+  set_engine("ranger",
+             num.threads = cores,    #for paralellism
+             importance = "impurity" #to check variable importance later
+             ) %>% 
+  set_mode("regression")
+
+#model <-  linear_reg(mode = "regression") %>%
+ # set_engine("lm") 
+
+workflow4 <- workflow() %>%
+  add_model(model)
+
+lock_rec<-  recipe(hr ~ ., data = train_data) %>% 
+  #step_naomit(everything()) %>%
+  update_role(everything(), -hr,new_role = "ID") %>%
+  update_role(watt, watt_m3, watt_m5, minute, watt_mean, watt_m5, new_role = "predictor")%>%
+  step_naomit(watt_m5)
+  
+  #update_role(workout_code, date, device, fule_name, date, new_role = "ID")
+
+workflow4 <- add_recipe(workflow4, lock_rec)
+```
+
+```{r}
+set.seed(4943)
+train_data_rs <- bootstraps(train_data, times = 30)
+```
+
+```{r}
+# manually create a grid
+spline_grid <- expand.grid(trees = c(500,1000,2000,3000))
+
+
+ctrl <- control_grid(verbose = FALSE, save_pred = TRUE)
+```
+
+
+```{r}
+set.seed(35)
+formula_res <-
+  workflow4 %>% 
+  tune_grid(
+    Class ~ .,
+    resamples = train_data_rs,
+    #metrics = roc_vals,
+    control = ctrl,
+    grid = 20 #spline_grid
+  )
+```
+
+
+```{r}
+show_best(formula_res)
+```
+
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  select(mean, trees, mtry) %>%
+  pivot_longer(trees:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  #mutate(min_n = factor(min_n)) %>%
+  ggplot(aes(trees, mean, group = mtry, color =as.factor(mtry))) +
+  geom_line(alpha = 0.5, size = 1.5) +
+  geom_point() +
+  labs(y = "mean")
+```
+
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  select(mean, min_n, mtry) %>%
+  pivot_longer(min_n:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+
+
+### Choosing the best model
+
+
+```{r}
+best_rmse <- select_best(formula_res, metric = "rmse")
+best_rmse
+```
+
+```{r}
+final_workflow <- finalize_workflow(
+  workflow4,
+  best_rmse
+)
+
+final_workflow
+```
+
+```{r}
+final_res <- fit(final_workflow, train_data )
+
+```
+
+```{r}
+final_res %>% extract_fit_parsnip() %>%
+  vip(geom = "point")
+```
+
+
+```{r}
+result_final <- test_data %>%
+                  bind_cols(
+                    predict(final_res, new_data = test_data) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+
+```{r}
+result_final %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+```{r}
+
+```
+
+
+
+
+https://juliasilge.com/blog/sf-trees-random-tuning/ 
+feature importance:
+geht aber nicht??
+```{r}
+library(vip)
+
+final_workflow %>%
+  set_engine("ranger", importance = "permutation") %>%
+  fit(legal_status ~ .,
+    data = data_model_split
+  ) %>%
+  vip(geom = "point")
+```
+
+
+
+
+
+```{r}
+set.seed(345)
+folds <- vfold_cv(train_data, v = 10)
+folds
+```
+
+
+```{r}
+#library(rstanarm)
+#options(mc.cores = parallel::detectCores())
+
+fit_workflow4 <- workflow4 %>% fit_resamples(folds)
+
+```
+
+```{r}
+collect_metrics(fit_workflow4)
+```
+
+dient nur zum abschätzen der performance unseres models!

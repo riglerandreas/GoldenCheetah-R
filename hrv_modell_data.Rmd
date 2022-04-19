@@ -1,0 +1,655 @@
+---
+title: "HRV Model"
+author: "ari"
+date: "2 11 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(osmdata)
+library(ggmap)
+library("jsonlite")
+#library(OpenStreetMap)
+library(plotly)
+library(lubridate)
+library(GGally)
+```
+
+
+Pfad definieren:
+```{r}
+
+pfad_aktivity <- "C:/Users/rigle/AppData/Local/GoldenCheetah/Andl/activities/" 
+
+path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+```
+
+```{r}
+files <- list.files(pfad_aktivity)
+
+
+files <- tibble(file_name = files)
+
+files <- files %>% mutate(file_date = str_sub(file_name,1,10),
+                          file_year = str_sub(file_name,1,4))
+
+count(files)
+```
+
+
+## Funktionen
+
+
+
+```{r include=FALSE}
+#-----------Movement time:
+
+calculate_movement_time <- function(ridedata){
+  result <- ridedata %>%  mutate(time_diff = SECS - lag(SECS, default = 0),
+                                 km_diff = KM - lag(KM, default = 0),
+                                 time_diff_movement = if_else(KPH ==0 & km_diff == 0 , 
+                                                              time_diff, time_diff-1)) %>%
+              summarise(movement_time = (max(SECS) - sum(time_diff_movement )))  #seconds_to_period()
+  return(result$movement_time)
+}
+
+
+
+
+#------------elevation gain:--------------------------------------------------------------------
+
+calculate_elevation_gain <- function(ridedata){
+  if (sum(colnames(ridedata) %>% str_detect("ALT")) == 0){
+    return(as.numeric(NA))
+  }else{
+   result <- ridedata %>% 
+            arrange(SECS) %>% mutate(uphill = ALT-lag(ALT),
+                                     uphill = as.integer(uphill),
+                        uphill = if_else(uphill >0, 
+                                         if_else(uphill < 1,uphill,0L), #more than 1m/sec is too much (at the start when no altitude is available)
+                                         0L)) %>%
+  summarise(uphill = sum(uphill,na.rm = TRUE))
+   return(result$uphill)
+  }
+  
+}
+
+
+
+#------------mean cadence:--------------------------------------------------------------------
+
+calculate_cadence <- function(ridedata){
+  if (sum(colnames(ridedata) %>% str_detect("CAD")) == 0){
+    return(as.numeric(NA))
+  }else{
+   result <- ridedata %>% summarise(cadence = mean(CAD), na.rm = TRUE)
+
+   return(result$cadence)
+  }
+  
+}
+
+
+
+#===================TIME in ZONE==================================================
+
+#------------2mmol--------------------------------------------
+calculate_time_2mmol_w <- function(d,w_2mmol, w_min = 50){
+  #w_min ... time below this watt doesn't count
+  if (sum(names(d) =="WATTS") == 0| is.na(w_2mmol)) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(WATTS) %>% 
+            filter(WATTS <= w_2mmol &
+                   WATTS > w_min) %>%
+                  summarise(time_2mmol = n())
+    
+      return(d$time_2mmol)
+  }
+}
+
+#------------4mmol--------------------------------------------
+calculate_time_4mmol_w <- function(d,w_4mmol){
+  if (sum(names(d) =="WATTS") == 0| is.na(w_4mmol)) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(WATTS) %>% 
+            filter(WATTS >= w_4mmol) %>%
+                  summarise(time_4mmol = n())
+    
+      return(d$time_4mmol)
+  }
+}
+
+#------------below w_min--------------------------------------------
+calculate_time_below_w_min <- function(d, w_min = 50){
+  if (sum(names(d) =="WATTS") == 0) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(WATTS) %>% 
+            filter(WATTS <= w_min) %>%
+                  summarise(time_below_w_min = n())
+    
+      return(d$time_below_w_min)
+  }
+}
+
+
+
+
+#----------Notebook 3_Aktivitäten_analysieren_v4.Rmd--------------------------------------
+calculate_hr_mean <- function(d){
+  if (sum(names(d) =="HR") == 0) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(HR) %>% 
+
+                    summarise(hr_mean = as.integer(mean(HR,na.rm = TRUE)))
+    
+      return(d$hr_mean)
+      }
+}
+
+
+calculate_w_mean <- function(d){
+  if (sum(names(d) =="WATTS") == 0) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(WATTS) %>% 
+
+                    summarise(watt_mean = mean(WATTS,na.rm = TRUE))
+    
+      return(d$watt_mean)
+      }
+}
+  
+calculate_NP <- function(d){
+  if (sum(names(d) =="WATTS") == 0) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(WATTS) %>% 
+                 mutate(watt = as.ts(WATTS,frequency = 1), #Timeseries machen
+                        watt_average =pracma::movavg(watt,25,type = "e"),#  ma(watt,order =60),  #gleitendender bzw. expon mittelwert
+                        watt_4 = watt_average^4) %>%  #4potenz
+                    summarise(watt_np = (mean(watt_4, na.rm=TRUE))^(1/4))
+    
+      return(d$watt_np)
+      }
+
+#TSS = (Sek x NP® x IF®)/(FTP x 3600) x 100
+}
+
+calculate_IF <- function(d,FTP){
+  if (sum(names(d) =="WATTS") == 0) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(WATTS) %>% 
+                 mutate(watt = as.ts(WATTS,frequency = 1), #Timeseries machen
+                        watt_average =pracma::movavg(watt,25,type = "e"),#  ma(watt,order =60),  #gleitendender bzw. expon mittelwert
+                        watt_4 = watt_average^4) %>%  #4potenz
+                    summarise(watt_mean = mean(WATTS),
+                              watt_np = (mean(watt_4, na.rm=TRUE))^(1/4),
+                              watt_average = mean(watt_average, na.rm=TRUE),
+                              sek = n()#
+                              ) %>%
+      mutate(intensity = watt_np/FTP)
+      return(d$intensity)
+      }
+}
+
+calculate_TSS <- function(d,FTP){
+    if (sum(names(d) =="WATTS") == 0) {
+    return(as.numeric(NA))
+  }else{
+      d<-d %>% select(WATTS) %>% 
+                 mutate(watt = as.ts(WATTS,frequency = 1), #Timeseries machen
+                        watt_average =pracma::movavg(watt,25,type = "e"),#  ma(watt,order =60),  #gleitendender bzw. expon mittelwert
+                        watt_4 = watt_average^4) %>%  #4potenz
+                    summarise(watt_mean = mean(WATTS),
+                              watt_np = (mean(watt_4, na.rm=TRUE))^(1/4),
+                              watt_average = mean(watt_average, na.rm=TRUE),
+                              sek = n()#
+                              ) %>%
+      mutate(intensity = watt_np/FTP,
+             TSS = as.integer((sek* watt_np * intensity)/(FTP * 3600)*100))
+      return(d$TSS)
+      }
+
+#TSS = (Sek x NP® x IF®)/(FTP x 3600) x 100
+}
+
+
+# BESTE Watt über x minuten
+calculate_best_watt <- function(d,min){
+
+  dauer <- d %>% summarise(n())
+  if(dauer < 60*min |
+     sum(names(d) =="WATTS") == 0){
+    return(as.numeric(NA))
+    }else{
+  
+        d<- d %>% select(SECS,WATTS) %>% 
+             mutate(watt = as.ts(WATTS,frequency = 1), #Timeseries machen
+                    #watt_average = rollmean(WATTS,x*60)
+                    watt_average =pracma::movavg(watt,min*60, type = c("s"))
+                    ) %>% summarise(beste_watt = max(watt_average))
+        return(d$beste_watt)
+        }
+}
+
+calculate_best_hr5 <- function(d){ 
+    if(sum(names(d) =="HR") == 0){
+  return(as.numeric(NA))
+    }else{
+  d<-d %>% mutate(hr = as.ts(HR,frequency = 1), #Timeseries machen
+                   hr_5 = pracma::movavg(hr,60*5, type = c("s"))) %>%
+  summarise(hr5_mean = mean(hr_5),
+         hr5_median = median(hr_5),
+         hr5_sd = sd(hr_5))
+      return(d)
+  
+  }
+}
+
+calculate_best_w5 <- function(d){ 
+    if(sum(names(d) =="WATTS") == 0){
+  return(as.numeric(NA))
+    }else{
+  d<-d %>% filter(WATTS >50) %>%   # sonst ergeben sich durchs bergabfahren verzerrungen?
+            mutate(watt = as.ts(WATTS,frequency = 1), #Timeseries machen
+                   watt_5 = pracma::movavg(watt,60*5, type = c("s"))) %>%
+  summarise(w5_mean = mean(watt_5),
+         w5_median = median(watt_5),
+         w5_sd = sd(watt_5),
+         zeit_mit_w = hms::as_hms(n()))
+      return(d)
+  
+  }
+}
+
+#================================== COUNT WATT and HR==============================
+
+count_watt <- function(d){ 
+    if(sum(names(d) =="WATTS") == 0){
+  return(tibble())
+    }else{
+  d<-d %>% mutate(watt= as.integer(WATTS)) %>% count(watt) 
+      return(d)
+  
+  }
+}
+
+count_hr <- function(d){ 
+    if(sum(names(d) =="WATTS") == 0){
+  return(tibble())
+    }else{
+  d<-d %>% mutate(hr= as.integer(HR)) %>% count(hr)
+      return(d)
+  
+  }
+}
+
+
+
+```
+
+
+## Import FTP data
+
+```{r}
+ftp_data_raw <- read_csv2(str_c(path_laktat_ftp,"FTP.csv"))
+
+ftp_data <- ftp_data_raw %>% mutate(date = as.Date(datum, "%d.%m.%Y")) %>% select(-datum) %>% arrange(date)%>% mutate(date_max = lead(date) - 1,
+                    date_min = date,
+                    date_max = if_else(is.na(date_max),Sys.Date(),date_max))
+
+i=1
+
+ftp_date_data <- list()
+for(i in seq_along(ftp_data$date)){
+    date_ftp <-tibble(date = seq(ftp_data[i,]$date_min,ftp_data[i,]$date_max, by ="day"))
+    date_ftp$ftp <- ftp_data[i,]$ftp
+    ftp_date_data[[i]] <- date_ftp
+  }
+date_ftp <- bind_rows(ftp_date_data)
+date_ftp
+```
+
+
+## YEAR Import data from GoldenCheetah
+
+Import all the training data! no aggregation
+
+```{r}
+year_selected <- "2018"
+files_selected <- files %>% select(file_name) %>% filter(str_detect(file_name,year_selected))
+files_selected
+```
+
+```{r import data and aggregate}
+EXEC_import = TRUE
+
+
+
+if(EXEC_import == TRUE){
+      
+      data_ride <- list()
+      data_rides <- list()
+      aggregation_rides <- list()
+      watt_count_rides <- list()
+      hr_count_rides <- list()
+      aggregation_ride <- tibble()
+      
+      for (i in seq_along(files_selected$file_name)){
+        
+           datei <- str_c(pfad_aktivity,files_selected$file_name[i])
+            try({
+                 data_ride <- read_json(datei)
+                 aggregation_ride <- tibble(file_name = files_selected$file_name[i],
+                                            workout_code = as.character(data_ride$RIDE$TAGS$`Workout Code`),
+                                            starttime = data_ride$RIDE$STARTTIME)
+                 aggregation_ride$device <- data_ride$RIDE$TAGS$Rad
+                 aggregation_ride$start_time <-data_ride$RIDE$STARTTIME
+                 aggregation_ride <-aggregation_ride %>% mutate(date = as.Date(start_time))
+                 
+                 #connect to the FTP date data
+                 aggregation_ride <- aggregation_ride %>% left_join(date_ftp, by ="date")
+                 FTP <- aggregation_ride$ftp
+                 
+                 #date for count of hr and watt
+                 date_ride <- aggregation_ride %>% summarise(max(date,na.rm = TRUE)) %>% pull()
+                 
+                 #connect to the laktat watt data
+                 #aggregation_ride <- aggregation_ride %>% left_join(laktat_watt_date, by ="date")
+                 
+                  #is there any trainings data?
+                  samples <- sum(names(data_ride[[1]]) == "SAMPLES")
+                 
+                 if (samples == 1) {  #there is trainings data
+             
+                        ridedata_list <- data_ride[[1]]$SAMPLES
+                        ridedata <- bind_rows(ridedata_list)
+                        ridedata <-ridedata %>% mutate(date = aggregation_ride$date,
+                                                       start_time = as.POSIXct(aggregation_ride$start_time),
+                                                       workout_code = as.character(data_ride$RIDE$TAGS$`Workout Code`),
+                                                       device = aggregation_ride$device,
+                                                       ftp = aggregation_ride$ftp,
+                                                       file_name = aggregation_ride$file_name)
+                        
+                 }        
+         
+            })
+           
+          aggregation_rides[[i]] <- ridedata#aggregation_ride
+          
+          
+          print(datei)
+        
+      }
+      
+      
+      
+      ride_data <- bind_rows(aggregation_rides)
+      ride_data %>% count()
+
+    #SAVE
+    ride_data %>% write_rds(str_c(path_laktat_ftp, "Results/season_",year_selected,".rds"))
+
+}
+
+```
+
+
+## Import allready safed data
+```{r}
+ride_data_2021 <- read_rds(str_c(path_laktat_ftp, "Results/season_2021.rds")) 
+ride_data_2020 <- read_rds(str_c(path_laktat_ftp, "Results/season_2020.rds")) 
+ride_data_2019 <- read_rds(str_c(path_laktat_ftp, "Results/season_2019.rds"))
+ride_data_2018 <- read_rds(str_c(path_laktat_ftp, "Results/season_2018.rds"))
+ride_data_2017 <- read_rds(str_c(path_laktat_ftp, "Results/season_2017.rds"))
+ride_data_2016 <- read_rds(str_c(path_laktat_ftp, "Results/season_2016.rds"))
+```
+
+```{r}
+data_for_ml <- function(d){
+  bin_size_seconds = 60 #seconds
+ bin_size_minutes = 30
+  
+  d <- d %>% filter(!is.na(WATTS) &
+                    !is.na(HR)) %>%
+    select(workout_code, date, device, file_name,ftp, everything()) %>%
+                  rename("watt" = "WATTS", "sec" = "SECS", "cad" = "CAD", "hr" = "HR", "km" = "KM", 
+                         "kmh" = "KPH", "slope" = "SLOPE", "temp" = "TEMP")%>%  
+                mutate(hour = hour(start_time))
+  
+  d<- d %>% mutate(sec_bin = as.integer(sec/bin_size_seconds),
+                                   min_bin = as.integer(sec/(bin_size_minutes*60)),
+                                   month = month(date))
+  return(d)
+}
+```
+
+### Save MLD data 
+```{r}
+data_for_ml(ride_data_2018) %>% write_rds( "Results/test_ml_data_2018.rds")
+```
+
+
+```{r}
+data_raw <- ride_data_2021 %>% select(workout_code, date, device, file_name,ftp, everything(), -LRBALANCE) %>%
+                  rename("watt" = "WATTS", "sec" = "SECS", "cad" = "CAD", "hr" = "HR", "km" = "KM", 
+                         "kmh" = "KPH", "slope" = "SLOPE", "temp" = "TEMP") 
+```
+
+## Clean the data
+
+```{r}
+data_clean <- data_raw %>% filter(#str_detect(workout_code, "GA1") &
+                                  !is.na(watt) &
+                                    !is.na(hr))
+
+data_clean <- data_clean %>%  mutate(hour = hour(start_time))
+```
+
+```{r}
+bin_size = 60 #seconds
+
+data_prep <- data_clean %>% mutate(sec_bin = as.integer(sec/bin_size))
+
+```
+
+
+```{r}
+data_prep %>% group_by(workout_code,date,device,file_name, hour, sec_bin) %>% 
+                summarise(watt = as.integer(mean(watt)),
+                          hr = as.integer(mean(hr))) %>%
+  filter(hr >0 & watt >0) %>%
+  
+  ggplot()+
+  geom_point(aes(x=watt, y = hr, color = hour), alpha = 1/10)+
+  facet_wrap(device~.)
+```
+
+# EXPORT ML Hier weitermachen Daten für export
+
+mit ggally korrelationen herausarbeiten
+
+```{r}
+bin_size_seconds = 60 #seconds
+bin_size_minutes = 30
+data_prep <- data_clean %>% mutate(sec_bin = as.integer(sec/bin_size_seconds),
+                                   min_bin = as.integer(sec/(bin_size_minutes*60)),
+                                   month = month(date))
+
+
+data_prep %>% write_rds( "Results/test_ml_data_2021.rds")
+```
+
+
+```{r}
+data_prep %>% group_by(workout_code,date,month, device,file_name, hour,sec_bin) %>% 
+                summarise(min_bin = min(min_bin),
+                          watt = as.integer(mean(watt)),
+                          hr = as.integer(mean(hr)),
+                          temp = as.integer(mean(temp))) %>%
+  filter(hr >0 & watt >0 & min_bin <5) %>%
+  
+  ggplot()+
+  geom_point(aes(x=watt, y = hr, color = as.factor(month)), alpha = 1/10)+
+  facet_wrap(device~.)
+```
+
+```{r}
+data_prep %>% filter(hr > 60) %>% group_by(workout_code,date,month, device,file_name, hour, sec_bin) %>% 
+                summarise(min_bin = min(min_bin),
+                          watt = as.integer(mean(watt)),
+                          hr = as.integer(mean(hr)),
+                          temp = as.integer(mean(temp))) %>% ungroup() %>%
+                    select(temp, watt, hr,sec_bin) %>% 
+  ggpairs(title="correlogram with ggpairs()") 
+```
+
+## Versuch HR zu modellieren
+Basis minuten daten
+
+```{r}
+data_minutes <- data_prep %>% filter(hr > 60) %>% group_by(workout_code,date,month, device,file_name, hour, sec_bin) %>% 
+                summarise(min_bin = min(min_bin),
+                          watt = as.integer(mean(watt)),
+                          hr = as.integer(mean(hr)),
+                          temp = as.integer(mean(temp))) %>% ungroup() %>%
+              rename("half_hour" = "min_bin", "minute" = "sec_bin" )
+
+data_minutes
+```
+
+## ML
+
+Ziel: HR möglichst gneau modellieren --> mit aktuellen daten veränderung in hr feststellen
+
+Watt before hat höchste korrelation mit hr!
+hour hat auch einen
+device wäre interessant - in zahl umwandeln wie im python kurs
+
+Ideen:
+- vielleicht mittelwert watt über letzten 5minuten nehmen
+- ebenfalls hr
+- wattspitzen im mittelwert (z.b max 5sekunden oder so..)
+- oder kurve entwickeln
+- eignen sich andere modelle besser? -testen!
+- Vielleicht in Zukunft: laufendes Modelltraining mit aktuellen daten --> bewerten der aktuellen daten --> ziel?
+
+ziel vielleicht:
+übertraining untertraining feststellen, fitnesstand (ftp etc) checken - vergleichen mit historischen daten
+
+
+```{r}
+library(mlr)
+
+data_task <- data_minutes %>% group_by(file_name) %>% 
+                                  arrange(minute) %>% 
+                                      mutate(minute_before = lag(minute),
+                                             watt_before = lag(watt),
+                                             watt_before2 = lag(watt, n =2)) %>% 
+                              filter(!is.na(minute_before)) %>%
+                              ungroup() %>% 
+                                  select(hour, minute, half_hour, watt,temp, hr,minute_before,watt_before,watt_before2 ) 
+
+hrTask <- makeRegrTask(data = data_task, target = "hr")
+
+lin <- makeLearner("regr.lm")
+
+#install.packages ("FSelector")
+#library(FSelector)
+
+filterVals <- generateFilterValuesData(hrTask,
+                                       method = "linear.correlation")
+
+filterVals$data
+
+plotFilterValues(filterVals) + theme_bw()
+```
+
+
+
+```{r}
+ride_data %>% ggplot(aes(x=WATTS))+
+  geom_point(aes(y=HR))
+```
+
+
+Man erkennt Ergometereinheiten: 
+konstante watt und steigender puls
+man erkennt auch am vormittag und abend (arbeit)
+```{r}
+ride_data %>% filter(HR >0 &
+                       device != "P2MIndoor ") %>%
+                mutate(five_minute = as.integer(SECS/(60*3))) %>%
+group_by(file_name,five_minute,date) %>% 
+        summarise(hr = mean(HR,na.rm = TRUE),
+                  watt = mean(WATTS, na.rm = TRUE)) %>%
+  ggplot(aes(x=watt))+
+  geom_point(aes(y = hr, color = as.factor(file_name)))+
+  facet_wrap(date~.)
+  
+```
+
+
+
+
+
+```{r}
+vo2_max = 295 # Schätzung - wass kann man ca 9 Minuten fahren
+factor_improvement = 0.5
+#https://twitter.com/Alan_Couzens/status/1455902408073105414?t=Cs__OHP0DP4NJv3A6mBY_Q&s=09
+
+
+
+watt_2mmol = 205 # konservativer wert
+watt_improve = vo2_max* factor_improvement
+
+ride_data_2021 %>% mutate(bereich= case_when(WATTS >watt_2mmol~ "over",
+                                        WATTS <= watt_improve ~ "under",
+                                        TRUE ~ "best")) %>% count(bereich) %>%
+                  mutate(rel = n /sum(n)*100)
+
+```
+
+```{r}
+vo2_max = 325 # Schätzung - wass kann man ca 9 Minuten fahren
+factor_improvement = 0.5
+#https://twitter.com/Alan_Couzens/status/1455902408073105414?t=Cs__OHP0DP4NJv3A6mBY_Q&s=09
+
+watt_2mmol = 220 # konservativer wert
+watt_improve = vo2_max* factor_improvement
+
+ride_data_2017 %>% mutate(bereich= case_when(WATTS >watt_2mmol~ "over",
+                                        WATTS <= watt_improve ~ "under",
+                                        TRUE ~ "best")) %>% count(bereich) %>%
+                  mutate(rel = n /sum(n)*100)
+
+```
+
+
+```{r}
+vo2_max = 325 # Schätzung - wass kann man ca 9 Minuten fahren
+factor_improvement = 0.5
+#https://twitter.com/Alan_Couzens/status/1455902408073105414?t=Cs__OHP0DP4NJv3A6mBY_Q&s=09
+
+watt_2mmol = 220 # konservativer wert
+watt_improve = vo2_max* factor_improvement
+
+ride_data_2016 %>% mutate(bereich= case_when(WATTS >watt_2mmol~ "over",
+                                        WATTS <= watt_improve ~ "under",
+                                        TRUE ~ "best")) %>% count(bereich) %>%
+                  mutate(rel = n /sum(n)*100)
+
+```
+
+

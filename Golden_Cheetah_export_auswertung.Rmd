@@ -1,0 +1,66 @@
+---
+title: "Auswertung Golden Cheetah export"
+author: "ari"
+date: "24 1 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+#library(gapminder)
+library(lubridate)
+library(modelr)
+
+
+library(extrafont)
+#font_import() #only the first time when this package is used
+```
+```{r}
+#https://www.r-bloggers.com/2019/03/adding-custom-fonts-to-ggplot-in-r/
+loadfonts(device = "win", quiet = TRUE)
+
+```
+
+
+## Einlesen
+
+
+
+```{r einlesen und bearbeiten}
+
+path_laktat <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+
+data <- read.csv(str_c(path_laktat,"golden_cheetah_export.csv"))
+
+data <- data %>% mutate(date = as.Date(Datum, "%d.%b %Y"),
+                        year = year(date),
+                        day = as.numeric(strftime(date, format = "%j")))
+```
+
+```{r}
+compare_year <- data %>% 
+  pivot_longer(cols = c("TSS", "zeit_in_bewegung", "CTL")
+               ) %>%
+  group_by(year, name) %>%
+  arrange(date) %>%
+  mutate(name_cum = case_when(name == "CTL" ~ value,
+                              TRUE ~ cumsum(value))) 
+
+compare_year %>% filter(year > 2015) %>%
+  ggplot(aes(day))+
+  geom_line(aes(y= name_cum, color = as.factor(year)))+
+  geom_line(data = compare_year %>% filter(year == 2022),
+            aes(y= name_cum, color = as.factor(year)), size = 1.2)+
+  facet_wrap(name~., scales = "free_y", nrow = 3)+
+  labs(color = "",
+       y = "")
+```
+
+
+

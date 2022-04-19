@@ -250,7 +250,7 @@ x_annot <- best_data_gemessen[3,"watt"] %>% pull()+30
 
 #========================COLOR
 #https://statisticsglobe.com/identify-default-color-palette-names-of-ggplot2-in-r
-month_Colors <- c("#00A5FF", "#00BDD0", "#00BE5", "#00C1AA", 
+month_Colors <- c("#00A5FF", "#00BDD0", "#000BE5", "#00C1AA", 
                   "#00BF7D", "#00BA42", "#39B600",
                   "#72B000", "#A3A500", "#C59900", 
                   "#D89000", "#E7861B") 
@@ -300,6 +300,47 @@ laktat_selected %>%
 
 ```
 
+```{r message=FALSE, warning=FALSE}
+month_selected <- laktat_selected %>% filter(month  %in% c("Jänner", "Februar")) 
+
+month_selected %>%
+  ggplot(aes(x=watt, color = year))+
+  geom_point(data = month_selected %>% filter(is.na(gemessen)), aes(y=laktat), size =1)+
+  geom_point(data = month_selected %>% filter(gemessen==TRUE),aes(y=laktat), size = 4)+
+  geom_line(data = best_data %>% filter(is.na(gemessen)), 
+            aes(y=laktat, color ="best", linetype = datum),
+            color = "black", alpha = 1/2)+
+  
+  geom_point(data = best_data %>% filter(gemessen==TRUE), aes(y=laktat, color ="best"), color = "black", size = 2)+
+  
+  #scale_color_brewer(palette="Blues")+
+ # scale_color_manual(values = month_Colors)+
+  
+  geom_hline(yintercept = 2, size=0.5, color = "lightgreen", linetype = 5)+
+  geom_hline(yintercept = 5, size=0.5, color = "red", linetype = 5)+
+  coord_cartesian(xlim = c(50,350))+
+  scale_y_continuous(breaks = c(0,2,4,6,8,10))+
+  
+   theme(panel.background = element_rect(fill = "white", colour = "grey80"),
+         panel.grid.major = element_line(colour = "grey87"), 
+         panel.grid.minor = element_line(colour = "transparent", linetype = 2),
+         strip.background =element_rect(fill="transparent"),
+         strip.text = element_text( family = "Arial Black"),
+
+         legend.key = element_rect(colour = NA, fill = NA),
+         #get fonds with: fonts()
+         legend.text =element_text(color = "black", family = "Arial"),
+         legend.title = element_text(family =  "Arial"))+
+  
+  facet_wrap(month~.)+
+ 
+  labs(y = "laktat [mmol]",
+       x = "power [watt]",
+       color = "month:",
+       linetype = "best result:")
+```
+
+
 ## Export Laktat values
 
 ```{r}
@@ -321,6 +362,7 @@ laktat_selected %>%
   geom_point(data = laktat_selected %>% filter(gemessen==TRUE),aes(y=laktat), size = 4)+
   geom_line(data = best_data %>% filter(is.na(gemessen)), aes(y=laktat, color ="best"), color = "black", alpha = 1/2)+
   geom_point(data = best_data %>% filter(gemessen==TRUE), aes(y=laktat, color ="best"), color = "black", size = 2)+
+  geom_point(aes(x= 144, y= 1.1, color = "nach corona"),size =3, shape = 2)+
   scale_color_brewer(palette="Blues")+
   geom_hline(yintercept = 2)+
   facet_wrap(month~.)+
