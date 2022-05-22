@@ -1,0 +1,231 @@
+---
+title: "hrv_modell_v1"
+author: "ari"
+date: "20 11 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Data from hrv_modell.Rmd (data_prep )
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(caret)
+```
+
+
+```{r}
+data_prep<- read_rds( "Results/test_ml_data.rds")
+data_prep %>% head()
+```
+
+Ziel: hr zu berechnen 
+
+Predictors:
+- watt
+- temp  geht noch nicht - was mache ich mit NA werte? indoor..
+- cad
+- kmh
+- slope
+- hour (morning hr ..)
+- device 
+
+Auf Minutenwerte zusammenfassen:
+
+```{r}
+preds_sum <- c("watt","cad", "kmh", "slope", "month", "hour", "slope")
+
+data_minutes <- data_prep %>% filter(hr > 60) %>%
+              group_by(workout_code,date, device,file_name, min_bin, sec_bin) %>% 
+                  summarise(across(c(preds_sum, "hr"), mean))%>%
+                    ungroup() %>%
+              rename("half_hour" = "min_bin",
+                     "minute" = "sec_bin")
+
+data_minutes <- data_minutes  %>% arrange(minute) %>%
+                  group_by(file_name) %>%
+                      
+                  mutate(watt_b1 = lag(watt, default = 0),
+                         hr_b1 = lag(hr, default = 0)) 
+
+preds <- c(preds_sum, "watt_b1","hr_b1" ,"minute")
+```
+
+## Trainings Test split
+```{r}
+files_all <- data_prep %>% distinct(file_name)
+
+set.seed(1353)
+files_split <- initial_split(files_all)
+train_files <- training(files_split)
+test_files <- testing(files_split)
+
+train_data <- train_files %>% left_join(data_minutes,by = "file_name")
+test_data <- test_files %>% left_join(data_minutes,by = "file_name")
+
+files_all
+```
+
+
+
+```{r}
+library(rstanarm)
+options(mc.cores = parallel::detectCores())
+
+
+rf_xy_fit <- 
+  rand_forest(mode = "regression") %>%
+  set_engine("ranger") %>%
+  fit_xy(
+    x = train_data[, preds],
+    y = train_data$hr
+  )
+
+rf_xy_fit
+```
+#### NEUES
+https://www.tidymodels.org/start/case-study/#second-model
+
+```{r}
+set.seed(123)
+splits      <- initial_split(hotels, strata = children)
+
+hotel_other <- training(splits)
+hotel_test  <- testing(splits)
+
+# training set proportions by children
+hotel_other %>% 
+  count(children) %>% 
+  mutate(prop = n/sum(n))
+```
+
+```{r}
+set.seed(234)
+val_set <- validation_split(train_data,
+                            prop = 0.80)
+val_set
+```
+
+
+```{r}
+rf_mod <- 
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>% 
+  set_engine("ranger", num.threads = cores) %>% 
+  set_mode("regression")
+
+rf_recipe <- 
+  recipe(hr ~ ., data = train_data %>% select(hr,preds))
+
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(rf_recipe)
+```
+
+```{r}
+lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 30))
+```
+
+
+```{r}
+set.seed(345)
+rf_res <- 
+  rf_workflow %>% 
+  tune_grid(val_set,
+            grid = lr_reg_grid,
+            control = control_grid(save_pred = TRUE))
+```
+
+
+```{r}
+rf_xy_fit %>% 
+  pluck(".workflow", 1) %>%   
+  pull_workflow_fit() %>% 
+  vip(num_features = 20)
+```
+
+
+```{r}
+# Caret model
+set.seed(1989)
+
+          feature_select_ranger <-
+            train(hr ~ .,
+                data = train_data %>% select(hr,preds),
+                method = "regression",
+
+                  )
+
+
+# view importance
+varImp(feature_select_ranger) 
+```
+
+```{r}
+
+
+```
+
+
+```{r}
+  test_data %>%
+  select(hr,month) %>%
+  bind_cols(
+    predict(rf_xy_fit, new_data = test_data[, preds])
+  ) %>% rename("randomforest" = ".pred") %>%
+  ggplot()+
+  geom_point(aes(x= hr, y = randomforest, color =month))
+```
+
+```{r}
+data_prediction <-  data_minutes %>%
+  #select(-preds) %>%
+  bind_cols(
+    predict(rf_xy_fit, new_data = data_minutes[, preds])
+  ) %>% rename("hr_pred" = ".pred")
+```
+
+
+```{r}
+files <- test_data %>% distinct(file_name) %>% pull()
+```
+
+
+```{r}
+data_prediction %>% filter(file_name %in% files[c(5,7,8,9)] ) %>%
+  ggplot(aes(x= minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color = "hr_pred"))+
+  geom_line(aes(y=watt, color = "watt"))+
+  facet_wrap(file_name~., scales = "free")
+```
+
+
+## Linear regression
+```{r}
+lm_xy_fit <- 
+  linear_reg(mode = "regression") %>%
+  set_engine("lm") %>%
+  fit_xy(
+    x = data_minutes[, preds],
+    y = data_minutes$hr
+  )
+
+lm_xy_fit
+
+```
+
+```{r}
+  data_minutes %>%
+  select(hr) %>%
+  bind_cols(
+    predict(lm_xy_fit, new_data = data_minutes[, preds])
+  ) %>% rename("lm_predict" = ".pred") %>%
+  ggplot()+
+  geom_point(aes(x= hr, y = lm_predict))
+```
+

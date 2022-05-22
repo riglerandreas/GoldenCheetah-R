@@ -39,24 +39,130 @@ outliers are ok - most time ergometer workouts with a fixed watt value
 - problem laufeinheiten und einheiten ohne watt - zählen nicht mitt -> inkludieren!
 - diemension der gesamtzeit noch miteinfließen lassen
 
+**WICHTIG**
+- bei balkendiagramm season Oktober_2021 mehr als 5h über schwelle? kann das stimmen, auch Tempo sehr hoch
+
+
+**NEUES**
+- modell für hrv/watt erzeugen -> predict für 180w --> zeitlichen verlauf erkennen (übertraining oder fitnesssteigerung)
+
+
 ```{r}
-watt_count_season <- training_watt_count_season %>% 
+training_data_season %>% filter(movement_time_sec > 0 ) %>% 
+  mutate(device =if_else(is.na(device) | 
+                           device == " " |
+                           device == "Asics2018 ", "Laufen",device),
+         sport = case_when(device %in% c("Ergometer ", "P2MIndoor ") ~ "indoor",
+                           device == "Laufen" ~ "running",
+                           TRUE ~ "bike") ) %>%
+  group_by(season, end_ftp, sport) %>% summarise(hrs = sum(movement_time_sec)/3600) %>%
+  
+  ggplot(aes(x= end_ftp))+
+  geom_bar(aes(y=hrs, fill = season), stat = "identity")+
+  facet_grid(sport~., scale = "free_y")
+```
+
+
+
+```{r}
+watt_count_season <- training_watt_count_season %>% filter(day_season >100) %>% 
                           group_by(season,end_ftp) %>%
                               mutate(n_total = sum(n, na.rm = TRUE)) %>% 
                           group_by(season,end_ftp, watt) %>%
                             summarise(n = sum(n, na.rm = TRUE),
                                       n_total = mean(n_total, na.rm = TRUE)) %>%
                               mutate(n_rel = n/n_total,
-                                     time_below_200 ) %>%
+                                     watt_rel = watt/ end_ftp) %>%
                                 arrange(watt) #%>%
                                     #mutate(n = if_else(n-lag(n)> 1000L, (lag(n)+lead(n))/2,n))
+```
 
+
+```{r}
 watt_count_season %>% 
   filter(watt %in% c(50:350) &
-           n < 10000 &
-           str_detect(season, "2021")) %>%
+           n < 10000 #&
+         #  str_detect(season, "2021")
+         ) %>%
   ggplot() +
   geom_point(aes(x=watt, y = n,color =as.factor(end_ftp)),stat="identity")
+```
+
+```{r}
+watt_count_season %>% 
+  filter(watt %in% c(50:350) &
+           n < 10000 #&
+         #  str_detect(season, "2021")
+         ) %>%
+  ggplot() +
+  geom_point(aes(x=watt_rel, y = n_rel,color =as.factor(season)),stat="identity")+
+  geom_vline(xintercept = 0.86)+
+  facet_wrap(end_ftp~.)
+```
+
+```{r}
+watt_count_season %>% 
+  filter(watt %in% c(50:350) &
+           n < 10000 #&
+         #  str_detect(season, "2021")
+         ) %>%
+  mutate(watt_rel_bin = cut(watt_rel, breaks = c(0, 0.7,0.9,2))) %>%
+  group_by(season, end_ftp, watt_rel_bin) %>%
+  summarise(n_rel=sum(n_rel)) %>%
+  ggplot() +
+  #geom_bar(aes(x=cut_interval(watt_rel, 4), y = n_rel,fill =as.factor(season)),stat="identity", position = "dodge")+
+  geom_bar(aes(x=watt_rel_bin, y = n_rel,fill =as.factor(season)),stat="identity", position = "dodge")+
+  facet_wrap(end_ftp~.)+
+  labs(x = "watt / end_ftp")
+```
+
+```{r}
+watt_count_season %>% 
+  filter(watt %in% c(50:350) &
+           n < 10000 #&
+         #  str_detect(season, "2021")
+         ) %>%
+  mutate(n_rel = n/n_total,
+         watt_rel = watt/ ftp) %>%
+  mutate(watt_rel_bin = cut(watt_rel, breaks = c(0, 0.75,0.8,1,2))) %>%
+  group_by(season, end_ftp, watt_rel_bin) %>%
+  summarise(n_rel=sum(n_rel),
+            n = sum(n),
+            hrs = n/(3600)) %>%
+  ggplot() +
+  #geom_bar(aes(x=cut_interval(watt_rel, 4), y = n_rel,fill =as.factor(season)),stat="identity", position = "dodge")+
+  geom_bar(aes(x=end_ftp, y = hrs,fill =as.factor(season)),stat="identity", position = "dodge")+
+  facet_wrap(watt_rel_bin~., scales = "free" )+
+  labs(x = "watt / ftp"      )
+
+```
+
+```{r}
+watt_count_season %>% 
+  filter(watt %in% c(265:350) &
+           n < 10000 &
+         str_detect(season, "2021_Oktober")
+         ) %>%
+  mutate(n_rel = n/n_total,
+         watt_rel = watt/ ftp) %>%
+  mutate(watt_rel_bin = cut(watt_rel, breaks = c(0, 0.7,0.8,1,2))) %>%
+  group_by(season, end_ftp, watt_rel_bin) %>%
+  summarise(n_rel=sum(n_rel),
+            n = sum(n),
+            hrs = n/(3600))%>%
+  ggplot() +
+  #geom_bar(aes(x=cut_interval(watt_rel, 4), y = n_rel,fill =as.factor(season)),stat="identity", position = "dodge")+
+  geom_bar(aes(x=end_ftp, y = hrs,fill =as.factor(season)),stat="identity", position = "dodge")+
+  facet_wrap(watt_rel_bin~.)+
+  labs(x = "watt / ftp")
+```
+
+```{r}
+training_watt_count_season %>% 
+  filter(watt %in% c(265:350) &
+           n < 10000 &
+         str_detect(season, "2021_Oktober")) %>% 
+  group_by(date) %>% summarise(n= sum(n)/3600) %>%arrange(desc(n))
 ```
 
 ### training zones

@@ -9,6 +9,10 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+#Open:
+- aggregate sport (running etc)
+
+
 # Goals:
 
 - import json files from goldencheetah into r
@@ -423,7 +427,7 @@ file_name_hr_count <- "Results/hr_count_result.rds"
 if( override_data == FALSE){
   #Load allready processed data
  old_aggregations <- read_rds(str_c(path_laktat_ftp, file_name_aggreagations))
- old_hr_watt <- read_rds(str_c(path_laktat_ftp, file_name_watt_count))
+ old_watt_count <- read_rds(str_c(path_laktat_ftp, file_name_watt_count))
  old_hr_count <- read_rds(str_c(path_laktat_ftp, file_name_hr_count))
  
 }else{old_aggregations <- tibble(file_name = c(" "))}
@@ -533,6 +537,8 @@ if(!is_empty(aggregation_rides)){
   if(override_data == FALSE){ 
     #if no update append the new data to the old data:
       aggregations_result <- aggregations_result %>% bind_rows(old_aggregations)
+      watt_count_result <- watt_count_result %>% bind_rows(old_watt_count)
+      hr_count_result <- hr_count_result %>% bind_rows(old_hr_count)
   }
   
   #Save the result:

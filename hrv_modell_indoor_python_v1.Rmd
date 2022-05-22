@@ -1,0 +1,1104 @@
+---
+title: "hrv_modell_indoor"
+author: "ari"
+date: "20 11 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Data from hrv_modell.Rmd (data_prep )
+
+Idee:
+Indoor ist sehr kontrollierte trainingsumgebung
+umegebungsvariablen aber auch der konstante belastungsbereich
+
+nur indoorwerte verwenden
+versuchen in einem bestimmten zeitbereich ein modell zu trainieren und mit dem die aktuelle zu bewerten
+
+1. daten für modell auswählen
+wichtig wäre sainson mit vielen trainignsdaten im indoorbereich
+
+
+2. möglichst genaues modell erzeugen
+dazu wichtig brauche bare features herausfinden (mittelwerte, lag, ...)
+fragestellung:
+  was ist für hr wesentlich?
+    - watt aktuell
+    - wie lange schon gefahren
+    - hr erholt sich / passt sich relativ langsam an --> ev. werte von vor 3, 2 ,1 minute
+    - es sollten keine hr werte verwendet werden --> ziel ist aus watt und umgebungsvariablen(zeit,..) 
+      die hr zu bestimmen 
+    
+    
+-- correlationsplot dürfte die hr vor 3minuten wichtig sein
+vielleicht correlation hr zu verschiedenen lag werten plotten (hr und watt)
+
+
+3. mit anderen saisonen vergleich
+
+4. wenn funktionier weitere schritte
+wie z.b. modell auf outdoor ausweiten
+oder kontinuierlich trainieren bzw.aktuelle form abschätzen
+
+
+## Verbesserungsvorschläge:
+- watt_3m wichtigster wert, vielleicht wichtig typische intervallängen abzubilden? (3min 5min 10min 20min 40min 50min)
+- vielleicht rohdaten feiner gestallten - 30sekunden mittlwerte?
+- aber vielleicht auch nur auf 1-2 monate konzentrieren --> kommende monate predicten (siehe ganz unten)
+
+- watt_m3 und watt_m4 sind die wichtigsten features, deutlich wichtiger als watt_m2 und watt_m5
+- derzeit im trainingssett nur 40 einheiten (man sieht deutliches overfitting). Vielleicht doch auf mehrere jahre ausdehnen und dann positive / negative abweichung bewerten. Leidet dann die Qualität darunter?
+
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(GGally)
+library(zoo) #rollmean
+library(vip) #feature importance
+```
+https://rstudio.github.io/reticulate/articles/r_markdown.html
+https://rstudio.github.io/reticulate/articles/calling_python.html
+
+```{r}
+library(reticulate)
+use_python("/Users/rigle/.conda")
+use_condaenv()
+```
+
+
+```{python}
+py -m pip install pandas
+```
+
+
+# Data
+## 2017
+
+
+```{r}
+data_2017_raw<- read_rds( "Results/test_ml_data_2017.rds")
+
+data_2017 <- data_2017_raw %>% filter(str_detect(device,"P2MIn") &
+                                        date < as.Date("2017-06-01")&
+                                        hr > 50 &
+                                        hr <200 &
+                                        watt > 0) %>%
+                                        rename("minute" = "sec_bin")
+data_2017 %>% head()
+```
+
+
+# Prepare
+
+
+```{r}
+data_2017_minute <-  data_2017 %>% group_by(workout_code,date,device,file_name, hour, minute) %>% 
+                summarise(watt = as.integer(mean(watt)),
+                          hr = as.integer(mean(hr))) %>%
+  mutate(minutes_10 = minute %/% 10,
+         cat= ifelse(str_detect(workout_code,"GA1"),"GA1","ELSE"))
+```
+
+```{r}
+watt_before <- function(x,n = 3){
+      result = rollmean(x,n,na.pad = TRUE, align = "right", fill = 0)
+      return(result)
+}
+```
+
+
+```{r}
+data_model <-  data_2017_minute %>% #select(hr,watt, file_name)
+                        group_by(file_name) %>%
+                        arrange(minute) %>%
+                            mutate( hr_3 = lag(hr,3),
+                                   hr_5 = lag(hr,5),
+                                   hr_10 = lag(hr,10)) %>%
+      mutate(watt_mean= cummean(watt),
+             watt_3 = lag(watt,3,default = 0),
+             watt_5 = lag(watt,5,default = 0),
+             watt_10 = lag(watt,10,default = 0),
+             watt_m2 = watt_before(watt,2),
+             watt_m3 = watt_before(watt,3),
+             watt_m4 = watt_before(watt,4),
+             watt_m5 = watt_before(watt,5),
+             watt_m10 = watt_before(watt,10),
+             watt_m15 = watt_before(watt,15),
+             watt_m20 = watt_before(watt,20),
+             watt_m25 = watt_before(watt,25),
+             watt_m30 = watt_before(watt,30),
+             watt_m40 = watt_before(watt,40),
+             watt_m50 = watt_before(watt,50),
+             watt_m60 = watt_before(watt,60),
+)%>%
+                        ungroup()
+
+data_model %>% select(watt, watt_m3)
+```
+
+```{r}
+data_model %>% filter(file_name == "2017_01_05_11_06_01.json" & minute <25) %>%
+#count(file_name)
+  
+  ggplot(aes(x=minute))+
+  geom_point(aes(y=watt, color = "watt"))+
+  geom_line(aes(y=watt, color = "watt"))+
+  geom_point(aes(y=watt_m5, color = "watt_m5"))+
+  geom_point(aes(y=watt_m3, color = "watt_3"))+
+geom_line(aes(y=watt_m5, color = "watt_m5"))+
+  geom_line(aes(y=watt_m3, color = "watt_3"))+
+  geom_point(aes(y=watt_m10, color = "watt_10"))+
+  geom_line(aes(y=watt_m10, color = "watt_10"))
+```
+
+
+# Model
+
+## Trainings Test split
+```{r}
+
+
+
+files_all <- data_model %>% ungroup() %>%distinct(file_name) %>% select(file_name)
+
+set.seed(1353)
+files_split <- initial_split(files_all)
+
+
+train_files <- training(files_split)
+test_files <- testing(files_split)
+
+train_data <- train_files %>% left_join(data_model,by = "file_name")
+test_data <- test_files %>% left_join(data_model,by = "file_name")
+
+#für final model:
+data_model_split <- initial_split(data_model)
+
+
+files_all
+```
+
+
+## Model 
+
+
+### CREATE RECIPE AND ROLES 
+
+
+
+
+
+```{r}
+#model <- rand_forest(mode = "regression") %>%
+ # set_engine("ranger")
+
+cores <- parallel::detectCores()
+cores
+
+model <- rand_forest( trees =  tune(),
+                      mtry = tune(),
+                      min_n = 3) %>%  #zuvor trainiert 
+  set_engine("ranger",
+             num.threads = cores,    #for paralellism
+             importance = "impurity" #to check variable importance later
+             ) %>% 
+  set_mode("regression")
+
+#model <-  linear_reg(mode = "regression") %>%
+ # set_engine("lm") 
+
+workflow <- workflow() %>%
+  add_model(model)
+
+hr_watt_rec<-  recipe(hr ~ ., data = train_data) %>% 
+  #step_naomit(everything()) %>%
+  update_role(everything(), -hr,new_role = "ID") %>%
+  update_role(watt, watt_m3, watt_m5, watt_m10, watt_m20, watt_m30, watt_m40, watt_m50, 
+              minute, watt_mean, watt_m5, new_role = "predictor")%>%
+  step_naomit(watt_m5)
+  
+  #update_role(workout_code, date, device, fule_name, date, new_role = "ID")
+
+workflow <- add_recipe(workflow, hr_watt_rec)
+```
+
+```{r}
+set.seed(4943)
+train_data_rs <- bootstraps(train_data, times = 30)
+```
+
+```{r}
+# manually create a grid
+spline_grid <- expand.grid(trees = c(500,1000,2000,3000))
+
+
+ctrl <- control_grid(verbose = FALSE, save_pred = TRUE)
+```
+
+
+```{r}
+set.seed(35)
+formula_res <-
+  workflow %>% 
+  tune_grid(
+    Class ~ .,
+    resamples = train_data_rs,
+    #metrics = roc_vals,
+    control = ctrl,
+    grid = 3 #spline_grid
+  )
+```
+
+
+```{r}
+show_best(formula_res)
+```
+
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  select(mean, trees, mtry) %>%
+  pivot_longer(trees:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  #mutate(min_n = factor(min_n)) %>%
+  ggplot(aes(trees, mean, group = mtry, color =as.factor(mtry))) +
+  geom_line(alpha = 0.5, size = 1.5) +
+  geom_point() +
+  labs(y = "mean")
+```
+
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  select(mean, min_n, mtry) %>%
+  pivot_longer(min_n:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+
+
+### Choosing the best model
+
+
+```{r}
+best_rmse <- select_best(formula_res, metric = "rmse")
+best_rmse
+```
+
+```{r}
+final_workflow <- finalize_workflow(
+  workflow,
+  best_rmse
+)
+
+final_workflow
+```
+
+```{r}
+final_res <- fit(final_workflow, train_data )
+
+```
+
+```{r}
+final_res %>% extract_fit_parsnip() %>%
+  vip(geom = "point")
+```
+
+
+```{r}
+result_final <- test_data %>%
+                  bind_cols(
+                    predict(final_res, new_data = test_data) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+```{r}
+
+files_test <- c("2017_02_13_19_13_13.json", "2017_03_15_19_06_28.json", "2017_01_02_15_20_44.json")
+
+result_final %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+```{r}
+result_final %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+## Model 2
+### CREATE RECIPE AND ROLES 
+
+
+
+
+
+```{r}
+#model <- rand_forest(mode = "regression") %>%
+ # set_engine("ranger")
+
+cores <- parallel::detectCores()
+cores
+
+model <- rand_forest( trees =  tune(),
+                      mtry = tune(),
+                      min_n = tune()) %>%  #zuvor trainiert (3 war gut) 
+  set_engine("ranger",
+             num.threads = cores,    #for paralellism
+             importance = "impurity" #to check variable importance later
+             ) %>% 
+  set_mode("regression")
+
+#model <-  linear_reg(mode = "regression") %>%
+ # set_engine("lm") 
+
+workflow <- workflow() %>%
+  add_model(model)
+
+hr_watt_rec<-  recipe(hr ~ ., data = train_data) %>% 
+  #step_naomit(everything()) %>%
+  update_role(everything(), -hr,new_role = "ID") %>%
+  update_role(watt, watt_3, watt_5, watt_10,
+              watt_m2, watt_m3, watt_m4, watt_m5, watt_m10, watt_m15, watt_m20, 
+              minute, watt_mean,  new_role = "predictor")%>%
+  step_naomit(watt_m5)
+  
+  #update_role(workout_code, date, device, fule_name, date, new_role = "ID")
+
+workflow <- add_recipe(workflow, hr_watt_rec)
+```
+
+```{r}
+set.seed(4943)
+train_data_rs <- bootstraps(train_data, times = 30)
+```
+
+```{r}
+# manually create a grid
+spline_grid <- expand.grid(trees = c(500,1000,2000,3000))
+
+
+ctrl <- control_grid(verbose = FALSE, save_pred = TRUE)
+```
+
+
+```{r}
+set.seed(35)
+formula_res <-
+  workflow %>% 
+  tune_grid(
+    Class ~ .,
+    resamples = train_data_rs,
+    #metrics = roc_vals,
+    control = ctrl,
+    grid = 60 #spline_grid
+  )
+```
+
+
+```{r}
+show_best(formula_res)
+```
+
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  select(mean, trees, mtry) %>%
+  pivot_longer(trees:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  #mutate(min_n = factor(min_n)) %>%
+  ggplot(aes(trees, mean, group = mtry, color =as.factor(mtry))) +
+  geom_line(alpha = 0.5, size = 1.5) +
+  geom_point() +
+  labs(y = "mean")
+```
+
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  select(mean, min_n, mtry) %>%
+  pivot_longer(min_n:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+
+
+### Choosing the best model
+
+
+```{r}
+best_rmse <- select_best(formula_res, metric = "rmse")
+best_rmse
+```
+
+```{r}
+final_workflow <- finalize_workflow(
+  workflow,
+  best_rmse
+)
+
+final_workflow
+```
+
+```{r}
+final_res <- fit(final_workflow, train_data )
+
+```
+
+```{r}
+final_res %>% extract_fit_parsnip() %>%
+  vip(geom = "point")
+```
+
+
+
+
+```{r}
+result_final <- test_data %>%
+                  bind_cols(
+                    predict(final_res, new_data = test_data) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+```{r}
+
+files_test <- c("2017_02_13_19_13_13.json", "2017_03_15_19_06_28.json", "2017_01_02_15_20_44.json")
+
+result_final %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+```{r}
+result_final %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+
+## xgboost
+https://www.r-bloggers.com/2020/05/using-xgboost-with-tidymodels/
+
+```{r}
+cores <- parallel::detectCores()
+cores
+
+model_xgb <- boost_tree(    trees = 1000,  
+                        min_n = tune(),
+                        tree_depth = tune(),
+                        learn_rate = tune(),
+                        loss_reduction = tune()) %>%  
+  
+  set_engine("xgboost",
+             #num.threads = cores,    #for paralellism
+             importance = "impurity" #to check variable importance later
+             ) %>% 
+  set_mode("regression")
+
+#model <-  linear_reg(mode = "regression") %>%
+ # set_engine("lm") 
+
+workflow_xgb <- workflow() %>%
+  add_model(model_xgb)
+
+hr_watt_rec<-  recipe(hr ~ ., data = train_data) %>% 
+  #step_naomit(everything()) %>%
+  update_role(everything(), -hr,new_role = "ID") %>%
+  update_role(watt, watt_3, watt_5, watt_10,
+              watt_m2, watt_m3, watt_m4, watt_m5, watt_m10, watt_m15, watt_m20, 
+              minute, watt_mean,  new_role = "predictor")%>%
+  step_naomit(watt_m5)
+  
+  #update_role(workout_code, date, device, fule_name, date, new_role = "ID")
+
+workflow_xgb <- add_recipe(workflow_xgb, hr_watt_rec)
+```
+
+
+```{r}
+set.seed(4943)
+train_data_rs <- bootstraps(train_data, times = 30)
+```
+
+
+```{r}
+ctrl <- control_grid(verbose = TRUE, save_pred = TRUE)
+```
+
+```{r}
+# grid specification
+xgboost_params <- 
+  dials::parameters(
+    min_n(),
+    tree_depth(),
+    learn_rate(),
+    loss_reduction()
+  )
+```
+
+```{r}
+xgboost_grid <- 
+  dials::grid_max_entropy(
+    xgboost_params, 
+    size = 50
+  )
+```
+
+2.variante:
+```{r}
+xgboost_grid  <- grid_latin_hypercube(
+                        tree_depth(),
+                        min_n(),
+                        loss_reduction(),
+                        sample_size = sample_prop(),
+                        #finalize(mtry(), vb_train),
+                        learn_rate(),
+                        size = 1
+)
+
+xgboost_grid
+```
+
+```{r}
+set.seed(35)
+
+doParallel::registerDoParallel()
+
+# hyperparameter tuning
+xgboost_tuned <- tune::tune_grid(
+  object = workflow_xgb,
+  resamples = train_data_rs,
+  grid = xgboost_grid,
+  metrics = yardstick::metric_set(rmse, rsq, mae),
+  control = ctrl
+)
+
+
+```
+
+
+
+```{r}
+show_best(xgboost_tuned)
+```
+
+
+```{r}
+show_best(xgboost_tuned)
+```
+
+```{r}
+xgboost_tuned %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  select(mean, trees, mtry) %>%
+  pivot_longer(trees:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  #mutate(min_n = factor(min_n)) %>%
+  ggplot(aes(trees, mean, group = mtry, color =as.factor(mtry))) +
+  geom_line(alpha = 0.5, size = 1.5) +
+  geom_point() +
+  labs(y = "mean")
+```
+
+```{r}
+formula_res %>%
+  collect_metrics() %>%
+  filter(.metric == "rmse") %>%
+  select(mean, min_n, mtry) %>%
+  pivot_longer(min_n:mtry,
+    values_to = "value",
+    names_to = "parameter"
+  ) %>%
+  
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~parameter, scales = "free_x") +
+  labs(x = NULL, y = "AUC")
+```
+
+
+### Choosing the best model
+
+
+```{r}
+best_xgb_rmse <- select_best(xgboost_tuned, metric = "rmse")
+best_xgb_rmse
+```
+
+```{r}
+final_workflow_xgb <- finalize_workflow(
+  workflow_xgb,
+  best_xgb_rmse
+)
+
+final_workflow_xgb
+```
+
+```{r}
+final_res_xgb <- fit(final_workflow_xgb, train_data )
+
+```
+
+```{r}
+final_res_xgb %>% extract_fit_parsnip() %>%
+  vip(geom = "point")
+```
+
+
+```{r}
+
+
+result_final_xgb <- data_model %>%
+                  bind_cols(
+                    predict(final_res_xgb, new_data = data_model) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+```{r}
+
+files_test <- c("2017_02_13_19_13_13.json", "2017_03_15_19_06_28.json", "2017_01_02_15_20_44.json")
+
+result_final_xgb %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+```{r}
+result_final %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+## Check problem
+
+```{r}
+problem <- result_final %>% filter(str_detect(workout_code, "FTP Test Zwift"))
+
+result_final %>% filter(str_detect(workout_code, "FTP Test Zwift") &
+                        minute >40) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+
+```{r}
+train_data %>% filter(watt > 250 & watt < 270) %>% count(workout_code, date) %>%
+     filter(n > 10) %>% 
+  left_join(train_data, by = c("workout_code", "date")) %>%
+  
+  ggplot(aes(x = minute))+
+  geom_line(aes(y= watt, color = workout_code))+
+  geom_line(data = problem, aes(y= watt, color = "PROBLEM"), size = 2)#+
+  facet_wrap(workout_code~.)
+```
+
+```{r}
+result_final_xgb %>% filter(str_detect(workout_code, "Schwelle 27")
+                      #str_detect(workout_code, "250W 52")
+                      ) %>% 
+  
+  ggplot(aes(x = minute))+
+  geom_line(aes(y= watt, color = "watt"))+
+  geom_line(aes(y= hr, color = "hr"))+
+  geom_line( aes(y= hr_pred, color = "hr_pred"))+
+  geom_line(data = problem, aes(y= watt, color = "watt"))+
+  geom_line(data = problem, aes(y= hr, color = "hr"))+
+  geom_line(data = problem, aes(y= hr_pred, color = "hr_pred"))+
+  facet_wrap(workout_code~date)
+```
+
+```{r}
+result_final_xgb %>%
+  ggplot(aes(x= minute))+
+  geom_point(aes(y= hr, color = workout_code), alpha =1/10)+
+  theme(legend.position = "" )
+```
+```{r}
+result_final_xgb %>%
+  ggplot(aes(x= minute))+
+  geom_point(aes(y= watt, color = workout_code), alpha =1/10)+
+  theme(legend.position = "" )
+```
+## New Split
+```{r}
+set.seed(1353)
+data_split2 <- initial_split(data_model)
+
+train_data2 <- training(data_split2)
+test_data2 <- testing(data_split2)
+```
+
+### RandomForest:
+```{r}
+cores <- parallel::detectCores()
+cores
+
+final_workflow <- read_rds("Results/workflow_rf.rds")
+
+final_res2 <- fit(final_workflow, train_data2 )
+
+#final_res2 %>% write_rds("Results/final_fit_rf.rds")
+```
+
+```{r}
+result_final2 <- data_model %>%
+                  bind_cols(
+                    predict(final_res2, new_data = data_model) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+```{r}
+
+files_test <- c("2017_02_13_19_13_13.json", "2017_03_15_19_06_28.json", "2017_01_02_15_20_44.json")
+
+result_final2 %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(data = result_final %>% filter(file_name %in% files_test),
+            aes(y=hr_pred, color ="prediction old"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+Schaut sehr gut aus, aber overfitted?
+
+### xgb
+
+```{r}
+final_workflow_xgb <- read_rds("Results/workflow_xgb.rds")
+final_xgb2 <- fit(final_workflow_xgb, train_data2 )
+
+#final_xgb2 %>% write_rds("Results/final_fit_xgb.rds")
+```
+
+
+```{r}
+result_final_xgb2 <- data_model %>%
+                  bind_cols(
+                    predict(final_xgb2, new_data = data_model) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+```{r}
+
+files_test <- c("2017_02_13_19_13_13.json", "2017_03_15_19_06_28.json", "2017_01_02_15_20_44.json")
+
+result_final_xgb2 %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+            aes(y=hr_pred, color ="prediction old"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+EXTREM GUT - OVERFITTING?
+### Check OVERFITTING
+```{r}
+train_data2_2 <- train_data2 %>% filter(!str_detect(workout_code, "FTP Test Zwift"))
+final_xgb2_2 <- fit(final_workflow_xgb, train_data2_2 )
+```
+
+
+```{r}
+result_final_xgb2_2 <- data_model %>%
+                  bind_cols(
+                    predict(final_xgb2_2, new_data = data_model) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+```{r}
+
+files_test <- c("2017_02_13_19_13_13.json", "2017_03_15_19_06_28.json", "2017_01_02_15_20_44.json")
+
+result_final_xgb2_2 %>% filter(file_name %in% files_test) %>%
+  
+  ggplot(aes(x=minute))+
+  #geom_line(aes(y=hr, color = "hr"), size =1)+
+  geom_line(aes(y= hr-hr_pred, color ="prediction data split 
+  wihtout FTP Test Zwift"), size = 1)+
+  geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+            aes(y=hr-hr_pred, color ="prediction files splitted"))+
+  geom_line(data = result_final_xgb2 %>% filter(file_name %in% files_test),
+            aes(y=hr-hr_pred, color ="prediction data splitted"))+
+  #geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ ., nrow = 3)+
+  labs(title = "prediction error of never seen  FTP Test Zwift",
+       colour = "",
+       y = "error")
+```
+
+--> data split strongest overfitting!
+--> file split is the best way to avoid overfitting (?)
+
+## SVM
+```{r}
+cores <- parallel::detectCores()
+cores
+
+svm_mod <-
+  svm_rbf(cost = tune(), rbf_sigma = tune()) %>%
+  set_mode("regression") %>%
+  set_engine("kernlab",
+             num.threads = cores,    #for paralellism
+             importance = "impurity")   #to check variable importance later
+```
+
+```{r}
+  # remove any zero variance predictors
+  step_zv(all_predictors()) %>% 
+ 
+```
+
+```{r}
+
+
+
+workflow_svm <- workflow() %>%
+  add_model(svm_mod)
+
+svm_rec<-  recipe(hr ~ ., data = train_data) %>% 
+  #step_naomit(everything()) %>%
+  update_role(everything(), -hr,new_role = "ID") %>%
+  update_role(watt, watt_3, watt_5, watt_10,
+              watt_m2, watt_m3, watt_m4, watt_m5, watt_m10, watt_m15, watt_m20, 
+              minute, watt_mean,  new_role = "predictor")%>%
+  step_naomit(watt_m5) %>%
+    # remove any zero variance predictors
+  step_zv(all_predictors())
+  
+  #update_role(workout_code, date, device, fule_name, date, new_role = "ID")
+
+workflow_svm <- add_recipe(workflow_svm, svm_rec)
+```
+
+```{r}
+set.seed(4943)
+train_data_rs <- bootstraps(train_data, times = 30)
+```
+
+
+
+
+```{r}
+ctrl <- control_grid(verbose = TRUE, save_pred = TRUE)
+```
+
+```{r}
+# grid specification
+svm_params <- 
+  dials::parameters(
+    cost(),
+    rbf_sigma()
+  )
+```
+
+```{r}
+svm_grid <- 
+  dials::grid_max_entropy(
+    svm_params, 
+    size = 15
+  )
+```
+
+
+
+```{r}
+set.seed(35)
+
+doParallel::registerDoParallel()
+
+# hyperparameter tuning
+svm_tuned <- tune::tune_grid(
+  object = workflow_svm,
+  resamples = train_data_rs,
+  grid = svm_grid,
+  metrics = yardstick::metric_set(rmse, rsq, mae),
+  control = ctrl
+)
+
+
+```
+
+```{r}
+show_best(svm_tuned)
+```
+
+```{r}
+best_svm_rmse <- select_best(svm_tuned, metric = "rmse")
+best_svm_rmse
+```
+
+```{r}
+final_workflow_svm <- finalize_workflow(
+  workflow_svm,
+  best_svm_rmse
+)
+
+final_workflow_svm
+```
+```{r}
+final_svm <- fit(final_workflow_svm, train_data )
+
+```
+
+`
+
+```{r}
+result_final_svm <- data_model %>%
+                  bind_cols(
+                    predict(final_svm, new_data = data_model) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+```{r}
+files_test <- c("2017_02_13_19_13_13.json", "2017_03_15_19_06_28.json", "2017_01_02_15_20_44.json")
+
+result_final_svm %>% filter(file_name %in% files_test) %>%
+  
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=watt, color = "watt"))+
+  geom_line(aes(y= hr_pred, color ="prediction"))+
+  facet_wrap(workout_code ~ ., nrow = 3)+
+  labs(title = "prediction error of never seen  FTP Test Zwift",
+       colour = "",
+       y = "error")
+```
+
+
+
+```{r}
+
+files_test <- c("2017_02_13_19_13_13.json", "2017_03_15_19_06_28.json", "2017_01_02_15_20_44.json")
+
+result_final_xgb2_2 %>% filter(file_name %in% files_test) %>%
+  
+  ggplot(aes(x=minute))+
+  #geom_line(aes(y=hr, color = "hr"), size =1)+
+  geom_line(aes(y= hr-hr_pred, color ="prediction data split 
+  wihtout FTP Test Zwift"), size = 1)+
+  geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+            aes(y=hr-hr_pred, color ="prediction files splitted"))+
+  geom_line(data = result_final_xgb2 %>% filter(file_name %in% files_test),
+            aes(y=hr-hr_pred, color ="prediction data splitted"))+
+  geom_line(data = result_final_svm %>% filter(file_name %in% files_test),
+            aes(y=hr-hr_pred, color ="prediction files splitted svm"))+
+  #geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ ., nrow = 3)+
+  labs(title = "prediction error of never seen  FTP Test Zwift",
+       colour = "",
+       y = "error")
+```
+
+SVM performt schlechter als xgb oder rf
+
+## Save Model
+https://github.com/juliasilge/modelops-playground/blob/master/train-model/train.md
+
+```{r}
+final_workflow %>% write_rds("Results/workflow_rf.rds")
+best_rmse %>% write_rds("Results/best_rmse_rf.rds")
+```
+
+```{r}
+final_workflow_xgb %>% write_rds("Results/workflow_xgb.rds")
+best_xgb_rmse %>% write_rds("Results/best_xgb_rmse.rds")
+```

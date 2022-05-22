@@ -1,0 +1,347 @@
+---
+title: "2018 Vergleich"
+author: "ari"
+date: "17 12 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(GGally)
+library(zoo) #rollmean
+library(vip) #feature importance
+```
+
+# Data
+
+```{r}
+data_2016_raw<- read_rds( "Results/test_ml_data_2016.rds")
+
+data_2017_raw<- read_rds( "Results/test_ml_data_2017.rds")
+
+data_2018_raw<- read_rds( "Results/test_ml_data_2018.rds")
+
+data_2019_raw<- read_rds( "Results/test_ml_data_2019.rds")
+
+data_2020_raw<- read_rds( "Results/test_ml_data_2020.rds")
+
+data_2021_raw<- read_rds( "Results/test_ml_data_2021.rds")
+
+```
+
+## Models
+
+trained in hrv_modell_indoor_v2
+
+```{r}
+# RandomForest:
+final_fit_rf <- read_rds("Results/final_fit_rf.rds")
+
+# XGB:
+final_fit_xgb <- read_rds("Results/final_fit_xgb.rds")
+```
+
+# Prepare
+
+```{r}
+data_to_minute <- function(d){
+  d <- d %>% filter(str_detect(device,"P2MIn") &
+                    hr > 50 &
+                    hr <200 &
+                    watt > 0) %>%
+             rename("minute" = "sec_bin") %>%
+    
+    group_by(workout_code,date,device,file_name, hour, minute) %>% 
+                            summarise(watt = as.integer(mean(watt)),
+                                      hr = as.integer(mean(hr))) %>%
+  mutate(minutes_10 = minute %/% 10,
+         workout_lower = str_to_lower(workout_code),
+         cat = case_when(str_detect(workout_lower,"ga1") ~ "GA1",
+                                  str_detect(workout_lower,"sst") ~ "SST",
+                                 str_detect(workout_lower,"vo2max") ~ "Vo2max",
+                                 str_detect(workout_lower,"laktattest") ~ "Laktattest",
+                                 TRUE ~ "other")) %>% 
+  select(-workout_lower)
+  return(d)
+}
+
+
+watt_before <- function(x,n = 3){
+      result = rollmean(x,n,na.pad = TRUE, align = "right", fill = 0)
+      return(result)
+}
+
+
+data_features <- function(d){
+  d <- d %>%   group_by(file_name) %>%
+                        arrange(minute) %>%
+                            mutate( hr_3 = lag(hr,3),
+                                   hr_5 = lag(hr,5),
+                                   hr_10 = lag(hr,10)) %>%
+      mutate(watt_mean= cummean(watt),
+             watt_3 = lag(watt,3,default = 0),
+             watt_5 = lag(watt,5,default = 0),
+             watt_10 = lag(watt,10,default = 0),
+             watt_m2 = watt_before(watt,2),
+             watt_m3 = watt_before(watt,3),
+             watt_m4 = watt_before(watt,4),
+             watt_m5 = watt_before(watt,5),
+             watt_m10 = watt_before(watt,10),
+             watt_m15 = watt_before(watt,15),
+             watt_m20 = watt_before(watt,20),
+             watt_m25 = watt_before(watt,25),
+             watt_m30 = watt_before(watt,30),
+             watt_m40 = watt_before(watt,40),
+             watt_m50 = watt_before(watt,50),
+             watt_m60 = watt_before(watt,60),
+            ) %>% 
+      ungroup()
+  return(d)
+  
+}
+```
+
+```{r}
+data_model_2016 <- data_to_minute(data_2016_raw) %>% data_features()
+data_model_2017 <- data_to_minute(data_2017_raw) %>% data_features()
+data_model_2018 <- data_to_minute(data_2018_raw) %>% data_features()
+data_model_2019 <- data_to_minute(data_2019_raw) %>% data_features()
+data_model_2020 <- data_to_minute(data_2020_raw) %>% data_features()
+data_model_2021 <- data_to_minute(data_2021_raw) %>% data_features()
+
+data_model_all <- data_model_2016 %>% bind_rows(data_model_2017) %>% bind_rows(data_model_2018)%>%
+                                      bind_rows(data_model_2019) %>% 
+                                      bind_rows(data_model_2020) %>% bind_rows(data_model_2021)
+```
+
+
+
+
+## Predict
+```{r}
+result_rf <- data_model_all %>%
+                  bind_cols(
+                    predict(final_fit_rf, new_data = data_model_all) %>% rename("hr_pred_rf" = ".pred")
+                  )
+
+```
+
+```{r}
+result_xgb <-data_model_all %>%
+                  bind_cols(predict(final_fit_xgb, new_data = data_model_all)) %>% 
+                              rename("hr_pred_xgb" = ".pred")  %>%
+                              select(file_name,minute,hr_pred_xgb)
+
+result_all <- result_rf %>% left_join(result_xgb, by=c("file_name", "minute"))
+                  
+```
+
+# Compare Seasons
+
+```{r}
+result_quality_rf <- result_rf %>% mutate(pred_error = hr - hr_pred_rf) %>% 
+                                    group_by(file_name,workout_code,cat,date) %>% 
+                                        summarise(pred_error = mean(pred_error,na.rm=TRUE))
+
+result_quality_rf %>% ggplot(aes(pred_error))+
+  geom_histogram(binwidth = 0.5)
+                   
+```
+
+```{r}
+result_quality_rf %>% 
+  mutate(year = as.factor(lubridate::year(date))) %>%
+  ggplot(aes(x=year))+
+  geom_violin(aes(y=pred_error))+
+  geom_jitter(aes(y=pred_error, color= year ), width = 0.15)+
+  facet_wrap(cat~.)
+```
+
+```{r}
+result_quality_rf %>% filter(cat %in% c("GA1", "SST")) %>%
+  mutate(year = as.factor(lubridate::year(date))) %>%
+  ggplot(aes(x=date))+
+  #geom_violin(aes(y=pred_error))+
+  geom_point(aes(y=pred_error, color= year ), width = 0.15)+
+  facet_wrap(cat~., nrow = 2)
+```
+```{r}
+result_quality_rf %>% filter(cat %in% c("GA1", "SST", "Vo2max", "Laktattest")) %>% ungroup() %>%
+  mutate(year = as.factor(lubridate::year(date)),
+         n = row_number(file_name)) %>%
+  ggplot(aes(x=n))+
+  #geom_violin(aes(y=pred_error))+
+  geom_point(aes(y=pred_error, color= year ))+
+  geom_smooth(aes(y=pred_error))+
+  facet_wrap(cat~., nrow = 3)
+```
+
+### Plot results
+
+Bei **Sufferfest Cadence Builds Neuromuskulaer** performt es nicht besonders - da hat die sehr hohe cadence die hf hochgetrieben
+
+BE GA1 3h einheiten auch nicht am Ende (die hf drift) --> Meßwert wie weit driftet die hf nach 1h, 2h,..
+
+```{r}
+selected_files_er10 <- result_quality %>% filter(pred_error >10)
+selected_files_er10
+```
+
+
+
+```{r}
+result_rf %>% filter(file_name %in% selected_files_er10$file_name[1:3]) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred_rf, color ="prediction"))+
+  #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+   #         aes(y=hr_pred, color ="prediction old"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ ., nrow = 3)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+```{r}
+selected_files_ga1 <- result_quality %>% filter(pred_error >5 & 
+                                            pred_error <10) %>% filter(str_detect(workout_code, "GA"))
+selected_files_ga1
+```
+
+
+
+```{r}
+result_rf %>% filter(file_name %in% selected_files_ga1$file_name[1:3]) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred_rf, color ="prediction"))+
+  #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+   #         aes(y=hr_pred, color ="prediction old"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ ., nrow = 3)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+## XGB
+
+performt anscheinend besser als rf
+
+### Predict
+```{r}
+result_xgb <- data_model %>%
+                  bind_cols(
+                    predict(final_fit_xgb, new_data = data_model) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+```{r}
+result_quality_xgb <- result_xgb %>% mutate(pred_error = hr - hr_pred) %>% 
+                                    group_by(file_name,workout_code,date) %>% 
+                                        summarise(pred_error = mean(pred_error,na.rm=TRUE))
+
+result_quality_all <- result_quality_xgb %>% select(file_name, pred_error) %>%
+                          left_join(result_quality_rf, 
+                                    by= "file_name", 
+                                    suffix = c("_xgb", "_rf")) %>%
+                          pivot_longer(cols= c(pred_error_rf, pred_error_xgb))
+
+result_quality_all %>%
+  ggplot(aes(value))+
+  geom_density(aes(color = name))
+```
+
+```{r}
+result_quality_all %>% ggplot(aes(x=name))+
+  geom_violin(aes(y=value))+
+  geom_jitter(aes(y=value), width = 0.15)
+```
+### Plot results
+
+Bei **Sufferfest Cadence Builds Neuromuskulaer** performt es nicht besonders - da hat die sehr hohe cadence die hf hochgetrieben
+
+BE GA1 3h einheiten auch nicht am Ende (die hf drift) --> Meßwert wie weit driftet die hf nach 1h, 2h,..
+
+```{r}
+selected_files <- result_quality %>% filter(pred_error >10)
+selected_files
+```
+
+
+
+```{r}
+result_xgb %>% filter(file_name %in% selected_files_ga1$file_name[1:3]) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+   #         aes(y=hr_pred, color ="prediction old"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ ., nrow = 3)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+##Compare XGB RF
+XGB --> Minuten haben mehr einfluß --> drift wird mehr berücksichtigt
+aber diese plötzlichen haker wirken wie overfitting (vielleich muß man noch den term watt*minute einführen)
+
+```{r}
+result_all %>% filter(file_name %in% selected_files_er10$file_name[]) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred_rf, color ="RF"))+
+  geom_line(aes(y=hr_pred_xgb, color ="XGB"))+
+  #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+   #         aes(y=hr_pred, color ="prediction old"))+
+  #geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ ., nrow = 4)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+```{r}
+files_compare <- result_all %>% mutate(diff= abs(hr_pred_rf - hr_pred_xgb)) %>% 
+  group_by(file_name, workout_code, date) %>% summarise(diff_models = mean(diff)) %>% arrange(desc(diff_models))
+```
+
+```{r}
+result_all %>% filter(file_name %in% files_compare$file_name[1:3]) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred_rf, color ="RF"))+
+  geom_line(aes(y=hr_pred_xgb, color ="XGB"))+
+  #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+   #         aes(y=hr_pred, color ="prediction old"))+
+  #geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ ., nrow = 3)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+## Trend
+```{r}
+result_all %>% mutate(pred_error = hr- hr_pred_rf) %>%
+    group_by(file_name, workout_code, date) %>% 
+  summarise(pred_error = mean(pred_error, na.rm =TRUE) ) %>%
+  
+      mutate(workout_lower = str_to_lower(workout_code),
+             workout = case_when(str_detect(workout_lower,"ga1") ~ "GA1",
+                                  str_detect(workout_lower,"sst") ~ "SST",
+                                 str_detect(workout_lower,"vo2max") ~ "Vo2max",
+                                 str_detect(workout_lower,"laktattest") ~ "Laktattest",
+                                 TRUE ~ "other")
+      ) %>% 
+  
+  ggplot(aes(x=date))+
+  geom_point(aes(y = pred_error, color = workout))+
+  geom_line(aes(y = pred_error, color = workout))
+```
+
