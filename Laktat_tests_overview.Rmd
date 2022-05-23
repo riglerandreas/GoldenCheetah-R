@@ -1,0 +1,316 @@
+---
+title: "Laktattests"
+author: "ari"
+date: "22 5 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+#library(gapminder)
+library(lubridate)
+library(modelr)
+
+
+library(extrafont)
+#font_import() #only the first time when this package is used
+```
+```{r}
+#https://www.r-bloggers.com/2019/03/adding-custom-fonts-to-ggplot-in-r/
+loadfonts(device = "win", quiet = TRUE)
+
+```
+
+
+## Einlesen
+
+```{r}
+ftp_laktat <- 5  #bei wieviel mmol ca FTP - bei mir sind es ziemlich genau 5mmol
+```
+
+
+```{r einlesen und bearbeiten}
+
+path_laktat <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+data <- read_excel(str_c(path_laktat,"Laktat.xls"))
+
+data <- data %>% rename(watt = Watt,
+                        laktat = Laktat,
+                        date = Datum,
+                        person = Person,
+                        intervall_dauer = Intervalllänge)
+
+
+data <- data %>% mutate(year =year(date),
+                           month=month(date))
+```
+
+## Functions
+
+```{r ftp_berechnung}
+
+    ftp_berechnung <- function(data_raw, date_selected){
+      date_selected <- as.Date(date_selected)
+      data_raw <- data_raw %>% filter(date == date_selected) #year == jahr & month == monat)
+    
+    #fehlmessungen filter: (laktat muss steigen)
+     data_raw <- data_raw %>% mutate(ungueltig = laktat-lag(laktat, 
+                                                    default =0)) %>% 
+       filter(ungueltig >0) %>% select(-ungueltig)
+     
+      data_gemessen <- data_raw
+     
+     model <- lm(laktat~(watt*watt),data=data_raw)#as.list(test) %>% 
+    #model_laktat <- nls(laktat~a*exp(b*watt),data = data_raw,start = list(a=0.01,b=0.01))
+    model_laktat <- nls(watt~a*log(b*laktat),data = data_raw,start = list(a=10,b=1))
+    
+    data_raw %>% data_grid(watt = seq_range(watt,30)) %>%
+      add_predictions(model,"laktat") %>%
+      ggplot(aes(x=watt,y=laktat))+geom_point()+
+      geom_point(data=data_raw,aes(color="original"))
+    
+    laktat_prediction <- data_raw %>% data_grid(laktat = seq_range(0.1:10.1,200)) %>%
+      add_predictions(model_laktat,"watt") 
+    
+    w_5m <- laktat_prediction %>% filter(laktat >4.9 & 
+                                         laktat < 5.1) %>% 
+                summarise(w_5m = mean(watt)) %>% round(digits=1)
+    w_2m <- laktat_prediction %>% filter(laktat >1.9 & 
+                                           laktat < 2.1) %>% 
+      summarise(w_2m = mean(watt)) %>% round(digits=1)
+    
+    laktat_result <- data_gemessen %>% mutate(gemessen = TRUE) %>%
+                        select(laktat,watt,gemessen) %>%
+                                      bind_rows(laktat_prediction) %>%
+                        mutate(date = date_selected)
+    
+    result <-  list(data = laktat_result,#laktat_prediction,
+          w_5m = w_5m,
+          w_2m = w_2m)
+    
+    return(result)
+}
+```
+
+
+
+
+```{r }
+###---------------------------calculation of 2mmol Watt
+### with nonlineare regression model
+
+watt_2mmol <- function(d){
+
+  result <-tibble()
+#fehlmessungen filter: (laktat muss steigen)
+ d <- d %>% arrange(watt) %>% mutate(ungueltig = laktat-lag(laktat, 
+                                                default =0)) %>% 
+   filter(ungueltig >0) %>% select(-ungueltig)
+ 
+ model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=1))
+ 
+ 
+ 
+ laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
+  add_predictions(model_laktat,"watt") 
+ date <- d %>% summarise(mean(date)) %>% pull()
+ watt <- laktat_prediction %>% filter(laktat <= 2) %>% summarise(watt = max(watt)) %>% pull()
+ 
+ result <- tibble("date" = date,
+                  "watt_2mmol" = watt)
+ return(result)
+}
+```
+
+
+```{r xmmol}
+watt_xmmol <- function(d,x){
+
+  result <-tibble()
+#fehlmessungen filter: (laktat muss steigen)
+ d <- d %>% arrange(watt) %>% mutate(ungueltig = laktat-lag(laktat, 
+                                                default =0)) %>% 
+   filter(ungueltig >0) %>% select(-ungueltig)
+ 
+ model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=1))
+ 
+ 
+ 
+ laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
+  add_predictions(model_laktat,"watt") 
+ date <- d %>% summarise(mean(date)) %>% pull()
+ watt <- laktat_prediction %>% filter(laktat <= x) %>% summarise(watt = max(watt)) %>% pull()
+ 
+ result <- watt
+ return(result)
+}
+
+```
+
+
+### 2mmol Progress
+
+
+
+```{r}
+date_list <- data %>% distinct(date)
+
+laktat_list <- list()
+for (i in seq_along(date_list$date)) {
+  
+  date_selected <- date_list[i,] %>% pull()
+  data_selected <- data %>% filter(date == date_selected)
+  
+  try(laktat_list[[i]] <- watt_2mmol(data_selected))
+  try(laktat_list[[i]]$watt_5mmol <- watt_xmmol(data_selected,5))
+  
+  laktat_list[i]$nr <- i
+  laktat_list[[i]]$date <- date_selected
+  #print(date_list[i,])
+}
+
+
+laktat_watt <- bind_rows(laktat_list)
+```
+
+
+```{r}
+laktat_watt%>% 
+    ggplot(aes(x=date))+
+    geom_point(aes(y=watt_2mmol, color = "2 mmol"))+
+  geom_smooth(aes(y=watt_2mmol, color = "2 mmol"))
+```
+
+```{r}
+laktat_watt  %>%
+           mutate(date_gap =  c(0,diff(date)),
+                 gap = case_when(is.na(watt_2mmol) ~ "NA",
+                                 date_gap < 40 ~"small",
+                                 TRUE ~ "big"),
+                 watt_2mmol = replace_na(watt_2mmol,150)) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=watt_2mmol, color = as.factor(gap)))
+```
+Jänner 20020 wäre interessant ist aber NA
+```{r}
+date_list_part <- date_list #%>% filter(date > as.Date("2021-01-01") &
+                                   #   date < as.Date("2021-01-30"))
+
+d <-list()
+for (i in seq_along(date_list_part$date)) {
+try(d[i] <-  ftp_berechnung(data, date_list_part$date[i]))
+}
+
+
+laktat_selected <- bind_rows(d)  %>% 
+                      mutate(date = as.factor(date))
+
+laktat_selected %>% 
+  ggplot(aes(x=watt, color = date))+
+  geom_point(aes(y=laktat))+
+  geom_point(data = laktat_selected %>% filter(gemessen==TRUE),aes(y=laktat,), size = 4)+
+  geom_hline(yintercept = 2)+
+  scale_y_continuous(breaks = c(1, 2, 4,5,7,10))+
+  scale_x_continuous(breaks = c(100, 160,200, 250, 300))+
+  theme_light()
+```
+
+```{r}
+data %>% filter(date ==  as.Date("2021-01-03"))
+laktat_watt
+```
+
+```{r}
+data_na <- data %>% filter(date ==  as.Date("2021-01-03")) %>% rename("date_na" = "date")
+latat_rounded <- laktat_selected %>% 
+                      mutate(watt= round(watt,1)) %>% 
+                              group_by(date,watt) %>% 
+                                      summarise(watt = mean(watt),
+                                                laktat_calc = mean(laktat))
+
+latat_rounded %>% right_join(data_na, by = "watt") %>%
+  mutate(laktat_diff = laktat_calc - laktat) %>% 
+        group_by(date) %>% summarise(laktat_diff = sum(abs(laktat_diff))) %>% arrange(laktat_diff)
+```
+
+2020-05-05 ist das nächste zu 2021-01-03 (sogar etwas besser) -> 200W ist OK (4mmol 235W, 5mmol 250W)
+```{r}
+data %>% filter(date ==  as.Date("2020-05-05")) %>% watt_2mmol
+data %>% filter(date ==  as.Date("2020-05-05")) %>% watt_xmmol(4)
+```
+
+```{r}
+laktat_selected_part <- laktat_selected %>% filter(date ==  "2020-05-05") 
+
+laktat_selected_part %>% 
+  ggplot(aes(x=watt))+
+  geom_point(aes(y=laktat, color = date))+
+  geom_point(data = laktat_selected_part %>% filter(gemessen==TRUE),aes(y=laktat, color = date), size = 4)+
+  geom_point(data = data_na ,aes(x = watt, y=laktat, color = "data_NA"), size = 4)+
+  geom_hline(yintercept = 2)+
+  scale_y_continuous(breaks = c(1, 2, 4,5,7,10))+
+  scale_x_continuous(breaks = c(100, 160,200, 250, 300))+
+  theme_light()
+```
+
+
+
+
+```{r}
+laktat_watt%>% 
+    ggplot(aes(x=watt_2mmol))+
+    geom_point(aes(y=watt_5mmol, color = as.factor(year(date))), size = 3)
+```
+
+
+
+```{r}
+data %>% filter(laktat < 2) %>% group_by(date) %>% summarise(watt_2mmol = max(watt)) %>%
+      
+  ggplot(aes(x=date))+
+  geom_point(aes(y=watt_2mmol))
+```
+
+Abstand zwischen 2 Tests:
+```{r}
+data %>% distinct(date,  .keep_all = TRUE) %>%
+      mutate(date_gap =  c(0,diff(date))) %>%
+  ggplot()+
+  geom_histogram(aes(date_gap), binwidth = 30)
+
+```
+Wieviele liegen eng zusammen? Anfangs - Endwert
+```{r}
+data %>% distinct(date,  .keep_all = TRUE) %>%
+      mutate(date_gap =  c(0,diff(date)),
+             gap = case_when(date_gap < 40 ~"small", TRUE ~ "big")) %>% count(gap)
+```
+
+```{r}
+data %>% filter(laktat < 2) %>% group_by(date) %>% summarise(watt_2mmol = max(watt)) %>%
+           mutate(date_gap =  c(0,diff(date)),
+             gap = case_when(date_gap < 40 ~"small", TRUE ~ "big")) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=watt_2mmol, color = gap))
+
+ 
+```
+
+Am inteessantesten 2020 und Anfang 2021
+Vielleicht diese Kurve mit 2mmol Werten verbessern
+
+```{r}
+data %>% filter(laktat < 2) %>% group_by(date) %>% summarise(watt_2mmol = max(watt)) %>%
+           mutate(date_gap =  c(0,diff(date)),
+             gap = case_when(date_gap < 40 ~"small", TRUE ~ "big")) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=watt_2mmol, color = as.factor(date_gap)))
+```
+
