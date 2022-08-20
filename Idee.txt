@@ -1,0 +1,3 @@
+zuerst mit rf predictions machen
+dann residuals berechnen
+dann lineare regression mit zeitreihe machen um hr drift festzustellen

@@ -301,7 +301,7 @@ laktat_selected %>%
 ```
 
 ```{r message=FALSE, warning=FALSE}
-month_selected <- laktat_selected %>% filter(month  %in% c("Jänner", "Februar")) 
+month_selected <- laktat_selected %>% filter(month  %in% c("Jänner", "Februar","April")) 
 
 month_selected %>%
   ggplot(aes(x=watt, color = year))+
@@ -318,6 +318,7 @@ month_selected %>%
   
   geom_hline(yintercept = 2, size=0.5, color = "lightgreen", linetype = 5)+
   geom_hline(yintercept = 5, size=0.5, color = "red", linetype = 5)+
+  geom_vline(xintercept = 250, size=0.5, color = "red", linetype = 5)+
   coord_cartesian(xlim = c(50,350))+
   scale_y_continuous(breaks = c(0,2,4,6,8,10))+
   
