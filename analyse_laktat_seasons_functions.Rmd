@@ -1,0 +1,324 @@
+---
+title: "analyse_laktat_seasons"
+author: "ari"
+date: "1 6 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+library(readxl)
+
+library(patchwork)
+library(GGally)
+
+source("functions/aggregate_seasons.R")
+```
+
+get the laktat data:
+- dates and calculated values
+- aggregate history of the 8 weeks before
+
+
+### read Laktat test data
+```{r}
+
+path_laktat <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+lactat_calculated  <-read_csv2(str_c(path_laktat,"laktat_watt.csv")) %>% rename("date" = "datum")
+
+
+hour_of_power = tibble(date = as.Date(c("2017-05-22", "2017-03-24", "2016-07-20")),
+                       w_5mmol = c(286, 282, 261))
+
+
+lactat_calculated <- lactat_calculated  %>%  
+                                            bind_rows(hour_of_power) %>% 
+                          distinct(date, .keep_all = TRUE)
+
+
+```
+
+
+
+### Read export data from Goldencheetah
+
+```{r}
+data_gc <- read_gc_data("Results/goldencheetah_tss.csv")
+```
+
+```{r}
+data_gc %>% group_by(year(date)) %>% count() 
+```
+
+
+
+
+
+```{r}
+data_gc %>% ggplot(aes(x=date))+
+  geom_point(aes(y = hr_watt) )+
+  geom_smooth((aes(y=hr_watt)))+
+  coord_cartesian(ylim = c(0,2))
+```
+
+```{r}
+data_gc %>% ggplot(aes(x=date))+
+  geom_point(aes(y = duration) )+
+  geom_smooth((aes(y=duration)))
+```
+
+```{r}
+data_gc %>% mutate(week = week(date),
+                   year = year(date)) %>%
+  group_by(year,week) %>% 
+  summarise(TSS =sum(TSS,na.rm = TRUE),
+            date =min(date)) %>%
+ggplot(aes(x=date))+
+  geom_point(aes(y = TSS) )+
+  geom_smooth((aes(y=TSS)))+
+  labs(y = "TSS/ week")+
+  theme_light()
+```
+
+```{r}
+data_gc %>% mutate(week = week(date),
+                   year = year(date)) %>%
+  group_by(year,week) %>% 
+  summarise(duration =sum(duration,na.rm = TRUE),
+            TSS =sum(TSS,na.rm = TRUE),
+            date =min(date)) %>%
+  mutate(TSS_duration = TSS/duration) %>%
+ggplot(aes(x=date))+
+  geom_point(aes(y = TSS_duration) )+
+  geom_smooth((aes(y=TSS_duration)))+
+  labs(y = "TSS/ duration / week")+
+  theme_light()
+```
+
+```{r}
+data_gc %>% mutate(week = week(date),
+                   year = year(date)) %>%
+  group_by(year,week) %>% 
+  summarise(watt =mean(w_mean,na.rm = TRUE),
+            hr =mean(hr,na.rm = TRUE),
+            date =min(date)) %>%
+  mutate(hr_watt = hr/watt) %>%
+  
+  filter(hr_watt < 1.5) %>%
+  
+ggplot(aes(x=date))+
+  geom_point(aes(y = hr_watt) )+
+  geom_smooth((aes(y=hr_watt)))+
+  geom_hline(yintercept = 0.8)+
+  #coord_cartesian(ylim = c(0,3))+
+  labs(y = "hr/ watt / week")+
+  theme_light()
+```
+
+
+
+### Summarise the metrics for each season
+
+## Funkfunctions/aggregate_seasons.Rion Wochen Aggregation
+```{r}
+data_season <- generate_season_summary(lactat_calculated, data_gc, duration_weeks = 12)
+```
+
+```{r}
+plot_w_duration <- function(plot_data, duration_weeks){
+  
+  plt_duration <- plot_data %>% 
+    ggplot(aes(y=w_2mmol))+
+    geom_jitter(aes(x=duration, color = year))+
+    #geom_vline(xintercept = activities_today$TSS)+
+    geom_line(aes(x=duration, group = year, color = year))+
+    labs(title = str_c("duration last ", duration_weeks, " weeks"))+
+    theme_light()
+  
+  plt_tss <- plot_data %>% 
+    ggplot(aes(y=w_2mmol))+
+    geom_jitter(aes(x=TSS, color = year))+
+    #geom_vline(xintercept = activities_today$TSS)+
+    geom_line(aes(x=TSS, group = year, color = year))+
+    geom_smooth(aes(x=TSS))+
+    labs(title = str_c("TSS last ", duration_weeks, " weeks"))+
+    theme_light()
+  
+  p_result = plt_duration / plt_tss
+  return(p_result)
+  
+}
+
+plot_w_duration(data_season, 12)
+```
+
+
+```{r}
+
+
+duration_weeks =12 
+calc_and_plot(lactat_calculated, data_gc,duration_weeks = 12)
+```
+
+```{r}
+calc_and_plot(lactat_calculated, data_gc, 10)
+```
+
+
+```{r}
+calc_and_plot(lactat_calculated, data_gc, 11)
+```
+
+#### Ausgangspunkt Leistung von Season finden
+
+```{r}
+lactat_calculated%>% arrange(date) %>% mutate(days = (date-lag(date)-12*7)) %>% arrange(desc(date))
+```
+
+
+Ergänzen mit es darf nicht in der zukunft liegen
+
+```{r}
+lactat_dates <- lactat_calculated %>% select(date)
+result <- c()
+
+i_n=1
+
+for (i in seq_along(lactat_dates$date)) {
+  for (ii in seq_along(lactat_dates$date)) {
+      result_ii = tibble(date = lactat_dates$date[ii]) %>%
+        mutate(date_other = lactat_calculated$date[i],
+          days = date - date_other)
+    result[[i_n]] <- result_ii  
+  i_n = i_n +1
+  }
+}
+
+dates_crossed <- bind_rows(result) %>% filter(date != date_other)
+
+
+result_diff <- c()
+for (weeks in c(4:20)) {
+mean_diff = dates_crossed %>% group_by(date) %>%
+                      mutate(season_diff = abs(days-7*weeks),
+                             season_diff = as.integer(season_diff),
+                             best_diff = min(abs(season_diff)))  %>% #filter(date == "2020-05-05")
+                      filter(season_diff == best_diff) %>% ungroup() %>%
+  summarise(mean_diff = mean(season_diff)) %>% mutate(weeks = weeks)  
+  
+result_diff[[weeks]] <- mean_diff
+
+}
+
+bind_rows(result_diff) %>% ggplot(aes(x=weeks))+ geom_line(aes(y=mean_diff))
+```
+
+
+
+#####   ALTES ----------------------------------
+
+```{r}
+files <- tibble(files = list.files("Results/")) %>% filter(str_detect(files,"ml_data_2")) %>% 
+                mutate(files = str_c("Results/",files)) %>% pull()
+files
+
+
+aggregate_raw_data <- function(data){
+  data_aggregated <- data %>% group_by(date,device, workout_code, start_time) %>%
+                                
+                                    summarise(duration_sec = max(sec),
+                                               watt = mean(watt),
+                                              hr = mean(hr))
+  
+  return(data_aggregated)
+}
+
+
+
+data_aggregated_list <- list()
+for (i in seq_along(files)) {
+    data_raw<- read_rds(files[i])
+    data_aggregated_list[[i]] <- data_raw %>% aggregate_raw_data()
+    
+  
+}
+
+data_aggregated <- bind_rows(data_aggregated_list)
+
+data_aggregated
+```
+
+
+```{r}
+activites_aggregated_list <- list()
+for (i in seq_along(lactat_calculated$date)) {
+  date_start = lactat_calculated$date_start[i]
+  date_end = lactat_calculated$date[i]
+  
+  w_2mmol <- lactat_calculated$w_2mmol[i]
+  w_5mmol <- lactat_calculated$w_5mmol[i]
+  
+  dates = tibble(date = seq(ymd(date_start), ymd(date_end), by = "1 day"))
+  
+  activities_data <- dates %>% left_join(data_aggregated) %>% filter(!is.na(workout_code))  
+  
+  activites_aggregated_list[[i]] <- activities_data %>% summarise(n = n(),
+                                                       hr_time = sum(hr*duration_sec),
+                                                       watt_time = sum(watt*duration_sec),
+                                                       duration_sec_sum = sum(duration_sec)) %>%
+                              mutate(duration = round(duration_sec_sum/3600,1),
+                                     watt = watt_time / duration_sec_sum,
+                                     hr = hr_time / duration_sec_sum,
+                                     date_test = date_end,
+                                     w_2mmol = w_2mmol,
+                                     w_5mmol = w_5mmol)
+  
+}
+
+activites_aggregated <- activites_aggregated_list %>% bind_rows()
+
+activites_aggregated %>%
+  ggplot(aes(x=date_test))+
+  geom_line(aes(y = duration, color = "duration"))+
+  geom_line(aes(y = w_2mmol, color = "2mmol"))+
+  geom_line(aes(y = w_5mmol, color = "5mmol"))+
+  geom_line(aes(y = hr, color = "hr"))+
+  geom_line(aes(y = watt, color = "watt"))
+```
+
+```{r message=FALSE, warning=FALSE}
+
+activites_aggregated %>%select(duration, w_2mmol, w_5mmol,watt, hr) %>% ggpairs()
+
+```
+
+```{r}
+activites_aggregated %>%select(date_test, duration, w_2mmol, w_5mmol,n) %>% 
+      filter(w_2mmol > 190 & duration <20)
+```
+
+
+### read trainings data
+```{r}
+data_2016_raw<- read_rds( "Results/test_ml_data_2016.rds")
+
+data_2017_raw<- read_rds( "Results/test_ml_data_2017.rds")
+
+data_2018_raw<- read_rds( "Results/test_ml_data_2018.rds")
+
+data_2019_raw<- read_rds( "Results/test_ml_data_2019.rds")
+
+data_2020_raw<- read_rds( "Results/test_ml_data_2020.rds")
+
+data_2021_raw<- read_rds( "Results/test_ml_data_2021.rds")
+
+data_2021_raw %>% summarise(max(date))
+```
+

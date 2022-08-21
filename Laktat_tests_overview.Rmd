@@ -16,11 +16,15 @@ library(readxl)
 #library(gapminder)
 library(lubridate)
 library(modelr)
+library(ggforce) #for elypse in ggplot
 
 
 library(extrafont)
 #font_import() #only the first time when this package is used
+
+getwd()
 ```
+
 ```{r}
 #https://www.r-bloggers.com/2019/03/adding-custom-fonts-to-ggplot-in-r/
 loadfonts(device = "win", quiet = TRUE)
@@ -198,7 +202,13 @@ laktat_watt  %>%
   ggplot(aes(x=date))+
   geom_point(aes(y=watt_2mmol, color = as.factor(gap)))
 ```
+```{r}
+laktat_watt %>% filter(is.na(watt_2mmol))
+```
+
+
 Jänner 20020 wäre interessant ist aber NA
+
 ```{r}
 date_list_part <- date_list #%>% filter(date > as.Date("2021-01-01") &
                                    #   date < as.Date("2021-01-30"))
@@ -222,13 +232,16 @@ laktat_selected %>%
   theme_light()
 ```
 
+### Fehlende Werte manuell finden
+fehlende werte weil die kurve nicht extrapoliert werden konnte
 ```{r}
-data %>% filter(date ==  as.Date("2021-01-03"))
+data %>% filter(date >  as.Date("2018-01-03") &
+                  date <  as.Date("2019-07-03")) %>% group_by(date) %>% summarise(n=n())
 laktat_watt
 ```
 
 ```{r}
-data_na <- data %>% filter(date ==  as.Date("2021-01-03")) %>% rename("date_na" = "date")
+data_na <- data %>% filter(date ==  as.Date("2018-06-25")) %>% rename("date_na" = "date")
 latat_rounded <- laktat_selected %>% 
                       mutate(watt= round(watt,1)) %>% 
                               group_by(date,watt) %>% 
@@ -240,14 +253,17 @@ latat_rounded %>% right_join(data_na, by = "watt") %>%
         group_by(date) %>% summarise(laktat_diff = sum(abs(laktat_diff))) %>% arrange(laktat_diff)
 ```
 
-2020-05-05 ist das nächste zu 2021-01-03 (sogar etwas besser) -> 200W ist OK (4mmol 235W, 5mmol 250W)
+
+
+
+
 ```{r}
-data %>% filter(date ==  as.Date("2020-05-05")) %>% watt_2mmol
-data %>% filter(date ==  as.Date("2020-05-05")) %>% watt_xmmol(4)
+data %>% filter(date ==  as.Date("2019-02-09")) %>% watt_2mmol
+data %>% filter(date ==  as.Date("2019-02-09")) %>% watt_xmmol(4)
 ```
 
 ```{r}
-laktat_selected_part <- laktat_selected %>% filter(date ==  "2020-05-05") 
+laktat_selected_part <- laktat_selected %>% filter(date ==  "2019-02-09") 
 
 laktat_selected_part %>% 
   ggplot(aes(x=watt))+
@@ -260,14 +276,52 @@ laktat_selected_part %>%
   theme_light()
 ```
 
+2020-05-05 ist das nächste zu 2021-01-03 (sogar etwas besser) -> 200W für 2mmol ist OK (4mmol 235W, 5mmol 250W)
+2022-01-10 ähnlich 2019-02-09: 180W 2mmol, 222W 4mmol, 236W 5mmol 
+2019-09-25 ähnlich 2019-03-07: 188W 2mmol 233W 4mmol, 248W 5mmol
+2018-09-25 ähnlich 2019-05-22: 200W 2mmol, 245W 4mmol, 263W 5mmol
+
+```{r}
+laktat_manuel <- tibble(date = as.Date(c("2020-01-05","2018-12-29", "2019-03-07", "2019-05-22", "2018-06-25")),
+                         watt_2mmol = c(180, 188, 188, 200, 190),
+                         watt_4mmol = c(222, 233, 233, 245,223),
+                         watt_5mmol = c(236, 248, 248,263,239))
+
+laktat_watt %>% filter(is.na(watt_2mmol)) 
+```
+
+## Ergänzte Werte
+
+```{r}
+laktat_watt_all <- laktat_watt %>% filter(!is.na(watt_2mmol)) %>% bind_rows(laktat_manuel)
+```
+
+```{r}
+laktat_watt_all%>% arrange(date)
+```
 
 
 
 ```{r}
-laktat_watt%>% 
+laktat_watt_all%>% 
     ggplot(aes(x=watt_2mmol))+
-    geom_point(aes(y=watt_5mmol, color = as.factor(year(date))), size = 3)
+    geom_point(aes(y=watt_5mmol, color = as.factor(year(date))), size = 3, alpha =0.7)+
+    geom_smooth(data= laktat_watt_all %>% filter(date != as.Date("2018-06-25")),aes(y=watt_5mmol, group = year(date), color = as.factor(year(date))), 
+                method = glm,
+                se = FALSE,
+                formula = y~x)+
+  #geom_mark_ellipse(aes(y=watt_5mmol, fill = year(date), label = year(date)))+
+  geom_ellipse(aes(x0 = 185, y0 = 252, a = 33, b = 6.5, angle = -40.2), linetype = 2) +
+  geom_ellipse(aes(x0 = 200, y0 = 250, a = 33, b = 6.5, angle = -40.2), linetype = 2,  color = "blue", fill ="blue", alpha = 0.005) +
+  labs(title = "Laktat thresholds by year",
+       color = "")+
+  theme_light()
+
+getwd()
 ```
+
+--> wirkt so, als ob ich damals höhere laktatwerte besser vertragen habe, aber die grundlage (2mmol war nachher besser)
+Aber das Verhältnis nicht mehr so gut --> basis für intensives training --> 5mmol nach oben!! 
 
 
 

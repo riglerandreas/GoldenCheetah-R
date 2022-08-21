@@ -327,7 +327,7 @@ date_ftp
 Import all the training data! no aggregation
 
 ```{r}
-year_selected <- "2018"
+year_selected <- "2022"
 files_selected <- files %>% select(file_name) %>% filter(str_detect(file_name,year_selected))
 files_selected
 ```
@@ -408,6 +408,7 @@ if(EXEC_import == TRUE){
 
 ## Import allready safed data
 ```{r}
+ride_data_2022 <- read_rds(str_c(path_laktat_ftp, "Results/season_2022.rds"))
 ride_data_2021 <- read_rds(str_c(path_laktat_ftp, "Results/season_2021.rds")) 
 ride_data_2020 <- read_rds(str_c(path_laktat_ftp, "Results/season_2020.rds")) 
 ride_data_2019 <- read_rds(str_c(path_laktat_ftp, "Results/season_2019.rds"))
@@ -437,7 +438,7 @@ data_for_ml <- function(d){
 
 ### Save MLD data 
 ```{r}
-data_for_ml(ride_data_2018) %>% write_rds( "Results/test_ml_data_2018.rds")
+data_for_ml(ride_data_2022) %>% write_rds( "Results/test_ml_data_2022.rds")
 ```
 
 
