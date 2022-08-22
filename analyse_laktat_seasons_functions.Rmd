@@ -220,9 +220,145 @@ result_diff[[weeks]] <- mean_diff
 bind_rows(result_diff) %>% ggplot(aes(x=weeks))+ geom_line(aes(y=mean_diff))
 ```
 
+##### ftp change
+```{r}
+ftp_change <- lactat_calculated%>% arrange(date) %>% mutate(w_5mmol_past = lag(w_5mmol),
+                                              w_5mmol_change = w_5mmol - w_5mmol_past,
+                                              date_past = lag(date),
+                                              days = date - date_past,
+                                              days = as.numeric(days)) %>% 
+                  filter(!is.na(w_5mmol_past)) %>% select(date, date_past, days, w_5mmol_change)
+
+ftp_change
+```
+
+```{r}
+ftp_change %>% 
+  ggplot(aes(days)) + 
+  geom_histogram(binwidth = 7)+
+  geom_vline(xintercept = 12*7)
+```
 
 
-#####   ALTES ----------------------------------
+```{r}
+data_season %>% left_join(ftp_change, by= c("date_test"="date")) %>%
+  filter(days <100) %>%
+  
+  ggplot(aes(x= TSS))+
+  geom_point(aes(y= w_5mmol_change, size = duration, color = year))
+```
+
+```{r}
+ftp_change %>% filter(year(date) == 2021 & days <100)
+```
+
+```{r}
+ftp_change %>% ggplot(aes(x=date))+
+  geom_point(aes(y= w_5mmol_change))
+```
+
+Funtkion schreiben:
+rechnet sich tage zu jedem datum aus
+berechnet die differenz zu 12 wochen
+--> geringste differenz (ausgenommen gleiches datum oder datum zu nahe (8 wochen? )) 
+wird genommen
+
+vielleicht nested funktion --> tibble mit datum und und differenztagen danach das minimum nehmen und unnesten 
+```{r}
+
+
+ftp_change_list <- c()
+
+for (i in seq_along(lactat_calculated$date)) {
+  test_date = lactat_calculated$date[i]
+  test_w_5mmol = lactat_calculated$w_5mmol[i]
+  
+  ftp_change_list[[i]] <- lactat_calculated %>% 
+                      mutate(days_diff = as.numeric(test_date - date ),
+                             date_past = date,
+                             date = test_date,
+                             w_5mmol_past = w_5mmol,
+                             w_5mmol_change = test_w_5mmol - w_5mmol_past,
+                             w_5mmol = test_w_5mmol) %>% 
+                  filter(days_diff > 4*7 &
+                           days_diff < 150) %>%
+                  filter(days_diff == min(days_diff))# %>%
+                    #select(date, date_past, days_diff,w_5mmol_change)
+  
+}
+ftp_change <- bind_rows(ftp_change_list) %>% arrange(desc(date))
+ftp_change
+```
+
+```{r}
+ ftp_change%>% left_join(data_season, by= c("date" = "date_test")) %>%
+  
+  ggplot(aes(x= TSS))+
+  geom_point(aes(y= w_5mmol_change, size = duration, color = year))
+```
+
+```{r}
+ ftp_change%>% left_join(data_season, by= c("date" = "date_test")) %>%
+  
+  ggplot(aes(x= duration))+
+  geom_point(aes(y= w_5mmol_change, size = duration, color = year))
+```
+
+```{r}
+ ftp_change%>% left_join(data_season, by= c("date" = "date_test")) %>%
+  mutate(cat_w5mmol_change = case_when(w_5mmol_change < -20 ~ "< -20",
+                                       w_5mmol_change < 0 ~ "< 0",
+                                       w_5mmol_change < 10 ~ "< 10",
+                                       w_5mmol_change >10 ~ ">10"))%>%
+  
+  ggplot(aes(x= duration))+
+  geom_point(aes(y= TSS, color =cat_w5mmol_change), size =5)
+```
+## In einer Funktion zusammenführen
+--> in einer funktion zusammenführen, gesteuert über trainings wochen
+
+```{r}
+
+calculate_ftp_change <- function(df,weeks_min =4 , weeks_max =22) {
+  ftp_change_list <- c()
+
+  for (i in seq_along(df$date)) {
+    test_date = df$date[i]
+    test_w_5mmol = df$w_5mmol[i]
+    
+    ftp_change_list[[i]] <- df %>% 
+                        mutate(days_diff = as.numeric(test_date - date ),
+                               date_past = date,
+                               date = test_date,
+                               w_5mmol_past = w_5mmol,
+                               w_5mmol_change = test_w_5mmol - w_5mmol_past,
+                               w_5mmol = test_w_5mmol) %>% 
+                    filter(days_diff > weeks_min*7 &
+                             days_diff < weeks_max*7) %>%
+                    filter(days_diff == min(days_diff)) %>%
+                      select(date, date_past, days_diff,w_5mmol_change)
+    
+  }
+  ftp_change <- bind_rows(ftp_change_list) %>% arrange(desc(date))
+  ftp_change
+  
+  return(ftp_change)
+  
+  
+}
+
+
+
+ftp_change <- calculate_ftp_change(lactat_calculated, weeks_min = 8, weeks_max =30)
+data_season <- generate_season_summary(lactat_calculated, data_gc, duration_weeks = 12)
+
+ftp_change%>% left_join(data_season, by= c("date" = "date_test"))
+```
+
+
+
+
+#  ALTES ----------------------------------
 
 ```{r}
 files <- tibble(files = list.files("Results/")) %>% filter(str_detect(files,"ml_data_2")) %>% 
