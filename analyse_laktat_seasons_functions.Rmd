@@ -355,7 +355,54 @@ data_season <- generate_season_summary(lactat_calculated, data_gc, duration_week
 ftp_change%>% left_join(data_season, by= c("date" = "date_test"))
 ```
 
+#### ftp interpolieren
+```{r}
+lactat_calculated %>% 
+  ggplot(aes(x = date))+
+  geom_point(aes(y=w_5mmol))+
+  geom_line(aes(y=w_5mmol))+geom_smooth(aes(y=w_5mmol))
+```
 
+```{r message=FALSE, warning=FALSE}
+duration_weeks =4
+
+data_plot <- generate_season_summary(lactat_calculated, data_gc, duration_weeks) %>% 
+  
+pivot_longer(cols = c(w_5mmol, TSS, duration)) 
+
+plot_1 <- data_plot %>%
+
+    ggplot(aes(x = date_test))+
+  geom_point(aes(y=value, color = name))+
+  geom_line(aes(y=value))+
+  
+  geom_smooth(aes(y=value, color = name))+
+  facet_wrap(name~., ncol = 1, scales = "free_y")+
+  labs(title= str_c("weeks: ",duration_weeks))
+
+plot_2 <- data_plot %>%
+  group_by(name) %>% 
+  
+    mutate(value_scaled = (value- min(value,na.rm = TRUE)) / (max(value,na.rm = TRUE) - min(value,na.rm = TRUE))) %>%
+
+    ggplot(aes(x = date_test))+
+    geom_smooth(aes(y=value_scaled, color = name))+
+  labs(title= str_c("weeks: ",duration_weeks))
+
+plot_1 / plot_2
+```
+
+
+```{r}
+test_data = tibble(date = as.Date(c("2022-01-01", "2022-03-01", "2022-04-01", "2022-04-28")),
+                   w_5mmol = c(100,200,100,200))
+
+n_days_past = 30
+
+test_data %>% mutate(w_5_past = lag(w_5mmol),
+                     days = as.numeric(date - lag(date)),
+                     w_5_estimate = (w_5mmol - w_5_past)/days * (days-n_days_past) +  w_5_past )
+```
 
 
 #  ALTES ----------------------------------
