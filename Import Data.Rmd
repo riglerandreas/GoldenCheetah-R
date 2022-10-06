@@ -75,8 +75,8 @@ count(files)
 # Only one day for testing 
 
 ```{r}
-start_date <- "2015-01-01"
-end_date <- "2022-01-01"
+start_date <- "2022-08-11"
+end_date <- "2022-08-11"
 
 
 date_selected <- tibble(file_date = seq.Date(as.Date(start_date),
@@ -352,7 +352,7 @@ count_hr <- function(d){
   }
 }
 
-count_hr(ridedata)
+
 
 ```
 
@@ -417,7 +417,7 @@ trainingsdaten als liste speichern count(watt, hr)
 
 
 ```{r import data and aggregate}
-override_data = TRUE  #If override_data = TRUE .. old aggregations will be overwritten, override_data = FALSE.. new date will be appended
+override_data = FALSE  #If override_data = TRUE .. old aggregations will be overwritten, override_data = FALSE.. new date will be appended
 
 file_name_aggreagations <- "Results/aggregations_result_counts.rds"
 file_name_watt_count <- "Results/watt_count_result.rds"
@@ -438,6 +438,7 @@ data_rides <- list()
 aggregation_rides <- list()
 watt_count_rides <- list()
 hr_count_rides <- list()
+intervals_rides <- list()
 aggregation_ride <- tibble()
 for (i in seq_along(files_selected$file_name)){
   if((!(files_selected$file_name[i] %in% old_aggregations$file_name))){
@@ -522,6 +523,8 @@ for (i in seq_along(files_selected$file_name)){
                                                    date = date_ride)
     hr_count_rides[[i]] <- hr_count %>% mutate(file_name = files_selected$file_name[i],
                                                    date = date_ride)
+    
+    
     
     print(datei)
   }

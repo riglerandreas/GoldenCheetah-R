@@ -59,7 +59,7 @@ data_gc <-  read_csv( "Results/goldencheetah_tss.csv") %>%
                     filter(duration >0)                                                                                        
 data_gc <- data_gc %>% mutate(hr_watt = case_when((w_mean >0) & (hr >0) ~ hr/w_mean))
                                                                                             
-data_gc %>% arrange((date))
+data_gc %>% arrange(desc(date))
 
 ```
 
@@ -134,7 +134,7 @@ ggplot(aes(x=date))+
 ### Calculate the season dates
 
 ```{r}
-duration_weeks = 12
+duration_weeks = 8
 
 today_date = tibble(date = today())
 hour_of_power = tibble(date = as.Date(c("2017-05-22", "2017-03-24", "2016-07-20")),
@@ -144,6 +144,8 @@ laktat_test_dates <- laktat_data %>% distinct(date) %>% bind_rows(today_date) %>
 
 lactat_calculated <- lactat_calculated  %>% bind_rows(today_date) %>% 
                                             bind_rows(hour_of_power) %>%mutate(date_start = date - weeks(duration_weeks))
+
+lactat_calculated %>% arrange(desc(date))
 ```
 
 ### Summarise the metrics for each season
@@ -377,7 +379,7 @@ calc_and_plot <-function(lactat_data, data_gc, duration_weeks){
 ```
 
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 lactat_calculated <- lactat_calculated  %>% bind_rows(hour_of_power)  %>% distinct(date_start, .keep_all = TRUE)
 
 duration_weeks =12 

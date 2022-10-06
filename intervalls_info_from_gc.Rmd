@@ -1,0 +1,219 @@
+---
+title: "Use Intervalls"
+author: "ari"
+date: '2022-09-01'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(osmdata)
+library(ggmap)
+library("jsonlite")
+#library(OpenStreetMap)
+library(plotly)
+library(lubridate)
+
+
+#custom funcitons
+
+source("functions_import.R")
+```
+
+path:
+
+```{r}
+
+path_activities <- "C:/Users/rigle/AppData/Local/GoldenCheetah/Andl/activities/" 
+
+```
+
+List json files:
+
+```{r}
+files <- list.files(path_activities)
+
+
+files <- tibble(file_name = files)
+
+files <- files %>% mutate(file_date = str_sub(file_name,1,10),
+                          file_year = str_sub(file_name,1,4))
+
+count(files)
+```
+
+# Only one day for testing 
+
+```{r}
+start_date <- "2022-08-11"
+end_date <- "2022-08-11"
+
+
+date_selected <- tibble(file_date = seq.Date(as.Date(start_date),
+                                             as.Date(end_date), 
+                                             by = "day") )
+date_selected <- date_selected %>% mutate(file_date = str_replace_all(as.character(file_date),"-","_"))
+
+files_selected <- files  %>% right_join(date_selected, 
+                             by= "file_date") %>% 
+                  filter(!is.na(file_name)) %>% #if the date doesn`t exist in the data
+                  select(file_name) #%>% pull()
+
+
+
+
+files_selected 
+
+```
+
+```{r}
+files_selected = files_selected[1,]
+```
+
+```{r}
+file_path <- str_c(path_activities,files_selected$file_name[1])
+
+data_ride <- read_json(file_path)
+```
+
+```{r}
+data_ride$RIDE$INTERVALS[[1]]
+```
+
+```{r}
+get_intervals <- function(data_ride){
+library(zoo)
+  
+intervals_gc_list <- data_ride$RIDE$INTERVALS
+
+intervals_n <- intervals_gc_list %>% length()
+
+intervals_list <- c()
+for (i in c(1:intervals_n)) {
+  intervals_list[[i]] <- tibble(
+  interval_name = intervals_gc_list[[i]]$NAME,
+  interval_start = intervals_gc_list[[i]]$START,
+  interval_ptest = intervals_gc_list[[i]]$PTEST
+  )
+  
+}
+
+
+interval <- intervals_list %>% bind_rows() %>% arrange(interval_start)
+
+# get the ride data
+ridedata_list <- data_ride[[1]]$SAMPLES
+ridedata <- bind_rows(ridedata_list)
+
+           
+
+#join with intervals
+ridedata_joined <- ridedata %>% left_join(interval, 
+                                          by = c("SECS" = "interval_start")) %>%
+                    arrange(SECS)     
+
+#fill NA
+ridedata_interval <- ridedata_joined %>% mutate(interval_name = na.locf(interval_name),
+                                                interval_ptest = na.locf(interval_ptest))
+
+#aggregate
+interval_aggregation <- ridedata_interval %>% group_by(interval_name,interval_ptest) %>%
+  
+                                                  summarise(interval_watt = mean(WATTS, na.rm = TRUE),
+                                                            interval_hr = mean(HR, na.rm = TRUE),
+                                                            interval_sec = n())
+
+
+interval_aggregation <- interval_aggregation %>% 
+                               mutate(#file_name = files_selected$file_name[i],
+                                      workout_code = as.character(data_ride$RIDE$TAGS$`Workout Code`),
+                                      device = data_ride$RIDE$TAGS$Rad,
+                                      start_time = data_ride$RIDE$STARTTIME,
+                                      date = as.Date(start_time))
+
+
+
+
+return(interval_aggregation)
+}
+```
+
+```{r}
+get_intervals(data_ride)
+```
+
+
+```{r}
+intervals_gc_list <- data_ride$RIDE$INTERVALS
+
+intervals_n <- intervals_gc_list %>% length()
+
+intervals_list <- c()
+for (i in c(1:intervals_n)) {
+  intervals_list[[i]] <- tibble(
+  interval_name = intervals_gc_list[[i]]$NAME,
+  interval_start = intervals_gc_list[[i]]$START,
+  interval_stop = intervals_gc_list[[i]]$STOP,
+  interval_ptest = intervals_gc_list[[i]]$PTEST
+  )
+  
+}
+
+
+interval <- intervals_list %>% bind_rows() %>% arrange(interval_start)
+interval
+```
+
+### connect with trainings data
+
+```{r}
+ridedata_list <- data_ride[[1]]$SAMPLES
+ridedata <- bind_rows(ridedata_list)
+ridedata
+```
+
+```{r}
+interval
+library(zoo)
+ridedata_joined <- ridedata %>% left_join(interval %>% select(-interval_stop), by = c("SECS" = "interval_start")) %>%
+  arrange(SECS) 
+
+ridedata_interval <- ridedata_joined %>% mutate(interval_name = na.locf(interval_name),
+                           interval_ptest = na.locf(interval_ptest)) 
+```
+
+```{r}
+interval_aggregation <- ridedata_interval %>% group_by(interval_name) %>% 
+  
+                                                  summarise(interval_watt = mean(WATTS, na.rm = TRUE),
+                                                            interval_hr = mean(HR, na.rm = TRUE),
+                                                            interval_sec = n(),
+                                                            min = interval_sec/60)
+
+interval_aggregation
+```
+
+```{r}
+interval_aggregation %>% filter(watt >240) %>% summarise(watt = mean(watt),
+                                                         sec = sum(sec))
+```
+
+
+
+```{r}
+ridedata_interval %>% ggplot(aes(x=SECS))+
+  geom_point(aes(y=WATTS, color = interval_name))
+```
+
+
+
+
+
+
+
+

@@ -1,0 +1,283 @@
+---
+title: "Anlyse Season v1"
+author: "ari"
+date: '2022-09-25'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+#library(gapminder)
+library(lubridate)
+library(modelr)
+library(patchwork)
+
+library(extrafont)
+#font_import() #only the first time when this package is used
+
+source("functions_ftp_laktat.R")
+source("functions_import.R")
+source("functions_sesons.R")
+```
+
+```{r}
+#https://www.r-bloggers.com/2019/03/adding-custom-fonts-to-ggplot-in-r/
+loadfonts(device = "win", quiet = TRUE)
+
+```
+
+
+## Einlesen
+
+
+```{r einlesen und bearbeiten}
+ftp_laktat <- 5  #bei wieviel mmol ca FTP - bei mir sind es ziemlich genau 5mmol
+
+path_laktat <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+data <- read_excel(str_c(path_laktat,"Laktat.xls"))
+
+data <- data %>% rename(watt = Watt,
+                        laktat = Laktat,
+                        datum = Datum,
+                        person = Person,
+                        inervall_dauer = Intervalllänge)
+
+
+data <- data %>% mutate(year =year(datum),
+                           month=month(datum))
+
+
+```
+
+
+
+### 2mmol Progress
+
+
+
+```{r message=FALSE, warning=FALSE}
+date_list <- data %>% distinct(datum)
+
+laktat_list <- list()
+for (i in seq_along(date_list$datum)) {
+  
+  date_selected <- date_list[i,] %>% pull()
+  data_selected <- data %>% filter(datum == date_selected)
+  
+  try(laktat_list[[i]] <- watt_2mmol(data_selected))
+  try(laktat_list[[i]]$watt_5mmol <- watt_xmmol(data_selected,5))
+  
+  laktat_list[i]$nr <- i
+  laktat_list[[i]]$date <- date_selected
+  #print(date_list[i,])
+}
+
+
+laktat_watt <- bind_rows(laktat_list) %>% arrange(date)
+```
+
+2020-07-07: hoch wirkt plausibel 
+2021-10-14: hoch interessant und plausibel
+2022-07-05: hoch
+2022-09-21: niedriger
+2020-02-04, 2020-05-05: niedrig
+
+
+```{r message=FALSE, warning=FALSE}
+seasons_slected <- tibble(date = c("2020-07-07", "2021-10-14", "2022-07-05", "2022-09-21", "2020-02-04", "2020-05-05"))
+
+seasons_laktat_watt <- laktat_watt %>% mutate(date = as.character(date)) %>% right_join(seasons_slected)  %>%
+  mutate( date = as.POSIXct(date))
+
+laktat_watt%>% 
+    ggplot(aes(x=date))+
+    geom_point(aes(y=watt_2mmol, color = "2 mmol"))+
+  geom_smooth(aes(y=watt_2mmol, color = "2 mmol"))+
+  geom_point(aes(y=watt_5mmol, color = "5 mmol"))+
+  geom_smooth(aes(y=watt_5mmol, color = "5 mmol"))+
+  geom_point(data = seasons_laktat_watt, aes(y=watt_2mmol, color = "2 mmol"), size = 4)+
+  geom_point(data = seasons_laktat_watt, aes(y=watt_5mmol, color = "5 mmol"), size = 4)+
+  geom_hline(yintercept = 200, linetype = 2)+
+  geom_hline(yintercept = 260, linetype = 2)+
+  theme_light()
+```
+
+- unterschiede in dauer watt %belastung
+- welcher zeitraum zeigt einfluss?
+- was sind gemeinsamkeiten?
+- was ist wichtig für hohe 2mmol??
+
+
+Season data, hr etc, 
+
+zuerst:
+- gc data
+- intervall data
+
+
+## ???
+```{r}
+path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+
+training_data_season <-read_rds(str_c(path_laktat_ftp,"Results/season_data_count.rds"))
+```
+
+### Read export data from Goldencheetah
+
+```{r}
+source("functions_import.R")
+
+data_gc <-  read_csv( "Results/goldencheetah_tss.csv")
+
+data_gc <- prepare_gc_summary(data_gc)
+                                                                                            
+data_gc %>% arrange(desc(date))
+```
+
+#### Summarise the metrics for each season
+
+fehler bei date_start
+funktionen für unten schreiben
+dann die daten anschaun
+duration und tss 10,11,12 wochen correlation fehlerfunktion
+
+```{r}
+source("functions_sesons.R")
+weeks_per_season = 12
+
+data_season <- generate_season_summary(lactat_data = seasons_laktat_watt, data_gc = data_gc, weeks_per_season)
+data_season_all <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, weeks_per_season)
+
+data_season %>% arrange(date_test) %>% select(year, date_test, everything())
+```
+
+
+```{r}
+data_season %>%
+  pivot_longer(cols = c(watt_2mmol, TSS, duration)) %>%
+  ggplot(aes(x=date_test))+
+  geom_line(aes(y= value))+
+  geom_point(aes(y= value))+
+  facet_wrap(name ~., ncol = 1, scales = "free_y")+
+  labs(title = str_c(weeks_per_season, " weeks per season"))+
+  theme_light()
+```
+
+
+
+
+```{r}
+weeks = c(1:20)
+
+weeks_correlation_list_2 <- list()
+weeks_correlation_list_5 <- list()
+weeks_correlation_all_list_2 <- list()
+weeks_correlation_all_list_5 <- list()
+
+col_2mmol <- c("watt_2mmol")
+col_5mmol <- c("watt_5mmol")
+
+col_variables <- c( "TSS", "duration", "n_long", "watt")
+col_selected_2 <- c(col_2mmol, col_variables)
+col_selected_5 <- c(col_5mmol, col_variables)
+
+for (i in seq_along(weeks)) {
+  
+  data_season <- generate_season_summary(lactat_data = seasons_laktat_watt, data_gc = data_gc, weeks[i])
+  data_season_all <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, weeks[i])
+  
+  weeks_correlation_list_2[[i]] = correlation_2mmol(data_season, col_selected_2) %>% mutate(weeks = !!weeks[i])
+  weeks_correlation_all_list_2[[i]] = correlation_2mmol(data_season_all, col_selected_2) %>% mutate(weeks = !!weeks[i])
+  
+  weeks_correlation_list_5[[i]] = correlation_5mmol(data_season, col_selected_5) %>% mutate(weeks = !!weeks[i])
+  weeks_correlation_all_list_5[[i]] = correlation_5mmol(data_season_all, col_selected_5) %>% mutate(weeks = !!weeks[i])
+  
+}
+
+
+corr_2mmol <- bind_rows(weeks_correlation_list_2) %>% pivot_longer(cols = col_variables) 
+corr_2mmol_all <- bind_rows(weeks_correlation_all_list_2) %>% pivot_longer(cols = col_variables)
+
+corr_5mmol <- bind_rows(weeks_correlation_list_5) %>% pivot_longer(cols = col_variables) 
+corr_5mmol_all <- bind_rows(weeks_correlation_all_list_5) %>% pivot_longer(cols = col_variables)
+```
+
+
+```{r}
+corr_2mmol %>%
+
+  ggplot(aes(x = weeks))+
+  geom_line(aes(y= value, color = name))+
+  labs(title = "selected seasons: correleation between 2 mmol watt considering weeks / season",
+       y = "correlation coefficient",
+       x = "weeks per season",
+       color = "features")+
+  geom_hline(yintercept = c(0.5,0.75), linetype = 3)+
+  coord_cartesian(ylim = c(0.3,0.9))+
+  theme_light()
+
+```
+
+```{r}
+corr_5mmol %>%
+
+  ggplot(aes(x = weeks))+
+  geom_line(aes(y= value, color = name))+
+  labs(title = "selected seasons: correleation between 5 mmol watt considering weeks / season",
+       y = "correlation coefficient",
+       x = "weeks per season",
+       color = "features")+
+  geom_hline(yintercept = c(0.5,0.75), linetype = 3)+
+  coord_cartesian(ylim = c(0.3,1))+
+  theme_light()
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+
+col_selected <- c("watt_5mmol", "TSS", "duration", "n_long")
+
+correlation_5mmol(data_season, col_selected)
+```
+
+
+```{r}
+
+weeks = c(1:20)
+
+weeks_correlation_list <- list()
+
+
+col_mmol <- c("watt_5mmol")
+col_variables <- c( "TSS", "duration", "n_long")
+col_selected <- c(col_mmol, col_variables)
+
+for (i in seq_along(weeks)) {
+  
+  data_season <- generate_season_summary(lactat_data = seasons_laktat_watt, data_gc = data_gc, weeks[i])
+  weeks_correlation_list[[i]] = correlation_5mmol(data_season, col_selected) %>% mutate(weeks = !!weeks[i])
+  
+}
+
+bind_rows(weeks_correlation_list) %>%
+      pivot_longer(cols = col_variables) %>%
+
+  ggplot(aes(x = weeks))+
+  geom_line(aes(y= value, color = name))+
+  labs(title = "correleation between 5 mmol watt considering weeks / season")+
+  coord_cartesian(ylim = c(0.3,1))+
+  theme_light()
+
+```
+
+- vielleicht mal mit allen season (laktat tests probieren)
+und analysieren!
+

@@ -19,6 +19,8 @@ library(modelr)
 
 library(extrafont)
 #font_import() #only the first time when this package is used
+
+source("functions_ftp_laktat.R")
 ```
 ```{r}
 #https://www.r-bloggers.com/2019/03/adding-custom-fonts-to-ggplot-in-r/
@@ -49,109 +51,8 @@ data <- data %>% rename(watt = Watt,
 
 data <- data %>% mutate(year =year(datum),
                            month=month(datum))
-```
 
-
-## Functions
-
-```{r ftp_berechnung}
-
-    ftp_berechnung <- function(data_raw, datum_selected){
-      datum_selected <- as.Date(datum_selected)
-      data_raw <- data_raw %>% filter(datum == datum_selected) #year == jahr & month == monat)
-    
-    #fehlmessungen filter: (laktat muss steigen)
-     data_raw <- data_raw %>% mutate(ungueltig = laktat-lag(laktat, 
-                                                    default =0)) %>% 
-       filter(ungueltig >0) %>% select(-ungueltig)
-     
-      data_gemessen <- data_raw
-     
-     model <- lm(laktat~(watt*watt),data=data_raw)#as.list(test) %>% 
-    #model_laktat <- nls(laktat~a*exp(b*watt),data = data_raw,start = list(a=0.01,b=0.01))
-    model_laktat <- nls(watt~a*log(b*laktat),data = data_raw,start = list(a=10,b=1))
-    
-    data_raw %>% data_grid(watt = seq_range(watt,30)) %>%
-      add_predictions(model,"laktat") %>%
-      ggplot(aes(x=watt,y=laktat))+geom_point()+
-      geom_point(data=data_raw,aes(color="original"))
-    
-    laktat_prediction <- data_raw %>% data_grid(laktat = seq_range(0.1:10.1,200)) %>%
-      add_predictions(model_laktat,"watt") 
-    
-    w_5m <- laktat_prediction %>% filter(laktat >4.9 & 
-                                         laktat < 5.1) %>% 
-                summarise(w_5m = mean(watt)) %>% round(digits=1)
-    w_2m <- laktat_prediction %>% filter(laktat >1.9 & 
-                                           laktat < 2.1) %>% 
-      summarise(w_2m = mean(watt)) %>% round(digits=1)
-    
-    laktat_result <- data_gemessen %>% mutate(gemessen = TRUE) %>%
-                        select(laktat,watt,gemessen) %>%
-                                      bind_rows(laktat_prediction) %>%
-                        mutate(datum = datum_selected)
-    
-    result <-  list(data = laktat_result,#laktat_prediction,
-          w_5m = w_5m,
-          w_2m = w_2m)
-    
-    return(result)
-}
-```
-
-
-
-
-```{r }
-###---------------------------calculation of 2mmol Watt
-### with nonlineare regression model
-
-watt_2mmol <- function(d){
-
-  result <-tibble()
-#fehlmessungen filter: (laktat muss steigen)
- d <- d %>% arrange(watt) %>% mutate(ungueltig = laktat-lag(laktat, 
-                                                default =0)) %>% 
-   filter(ungueltig >0) %>% select(-ungueltig)
- 
- model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=1))
- 
- 
- 
- laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
-  add_predictions(model_laktat,"watt") 
- date <- d %>% summarise(mean(datum)) %>% pull()
- watt <- laktat_prediction %>% filter(laktat <= 2) %>% summarise(watt = max(watt)) %>% pull()
- 
- result <- tibble("date" = date,
-                  "watt_2mmol" = watt)
- return(result)
-}
-```
-
-
-```{r xmmol}
-watt_xmmol <- function(d,x){
-
-  result <-tibble()
-#fehlmessungen filter: (laktat muss steigen)
- d <- d %>% arrange(watt) %>% mutate(ungueltig = laktat-lag(laktat, 
-                                                default =0)) %>% 
-   filter(ungueltig >0) %>% select(-ungueltig)
- 
- model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=1))
- 
- 
- 
- laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
-  add_predictions(model_laktat,"watt") 
- date <- d %>% summarise(mean(datum)) %>% pull()
- watt <- laktat_prediction %>% filter(laktat <= x) %>% summarise(watt = max(watt)) %>% pull()
- 
- result <- watt
- return(result)
-}
-
+data %>% count(datum)
 ```
 
 
@@ -178,7 +79,7 @@ for (i in seq_along(date_list$datum)) {
 }
 
 
-laktat_watt <- bind_rows(laktat_list)
+laktat_watt <- bind_rows(laktat_list) %>% arrange(date)
 ```
 
 
@@ -186,8 +87,34 @@ laktat_watt <- bind_rows(laktat_list)
 laktat_watt%>% 
     ggplot(aes(x=date))+
     geom_point(aes(y=watt_2mmol, color = "2 mmol"))+
-  geom_smooth(aes(y=watt_2mmol, color = "2 mmol"))
+  geom_smooth(aes(y=watt_2mmol, color = "2 mmol"))+
+  geom_point(aes(y=watt_5mmol, color = "5 mmol"))+
+  geom_smooth(aes(y=watt_5mmol, color = "5 mmol"))+
+  geom_hline(yintercept = 200, linetype = 2)+
+  geom_hline(yintercept = 260, linetype = 2)+
+  theme_light()
 ```
+
+2020-07-07: hoch wirkt plausibel 
+2021-10-14: hoch interessant und plausibel
+2022-07-05: hoch
+2022-09-21: niedriger
+2020-02-04, 2020-05-05: niedrig
+
+```{r message=FALSE, warning=FALSE}
+laktat_watt%>% filter(date > "2020-01-01" &
+                        date < "2020-12-01") #%>%
+    ggplot(aes(x=date))+
+    geom_point(aes(y=watt_2mmol, color = "2 mmol"))+
+  geom_smooth(aes(y=watt_2mmol, color = "2 mmol"))+
+  geom_point(aes(y=watt_5mmol, color = "5 mmol"))+
+  geom_smooth(aes(y=watt_5mmol, color = "5 mmol"))+
+  geom_hline(yintercept = 200, linetype = 2)+
+  geom_hline(yintercept = 260, linetype = 2)+
+  theme_light()
+```
+
+
 ```{r}
 laktat_watt%>% 
     ggplot(aes(x=watt_2mmol))+
@@ -201,7 +128,7 @@ laktat_watt%>%
 
 d <-list()
 for (i in seq_along(date_list$datum)) {
-try(d[i] <-  ftp_berechnung(data, date_list$datum[i]))
+try(d[i] <-  ftp_calculation(data, date_list$datum[i]))
 }
 
 
@@ -210,7 +137,7 @@ laktat_selected <- bind_rows(d)  %>%
 
 laktat_selected%>%
   ggplot(aes(x=watt, color = datum))+
-  geom_point(aes(y=laktat))+
+  geom_point(aes(y=laktat), size = 1/2)+
   geom_point(data = laktat_selected %>% filter(gemessen==TRUE),aes(y=laktat,), size = 4)+
   geom_hline(yintercept = 2)
 
@@ -277,6 +204,7 @@ laktat_selected %>%
   geom_hline(yintercept = 5, size=0.5, color = "red", linetype = 5)+
   coord_cartesian(xlim = c(50,350))+
   scale_y_continuous(breaks = c(0,2,4,6,8,10))+
+  scale_x_continuous(breaks = c(100, 150,200, 250, 300))+
   
    theme(panel.background = element_rect(fill = "white", colour = "grey80"),
          panel.grid.major = element_line(colour = "grey87"), 
@@ -301,11 +229,11 @@ laktat_selected %>%
 ```
 
 ```{r message=FALSE, warning=FALSE}
-month_selected <- laktat_selected %>% filter(month  %in% c("Juli","Juni", "Februar")) 
+month_selected <- laktat_selected %>% filter(month  %in% c("Juli","Juni", "September")) 
 
 month_selected %>%
   ggplot(aes(x=watt, color = year))+
-  geom_point(data = month_selected %>% filter(is.na(gemessen)), aes(y=laktat), size =1)+
+  geom_line(data = month_selected %>% filter(is.na(gemessen)), aes(y=laktat))+
   geom_point(data = month_selected %>% filter(gemessen==TRUE),aes(y=laktat), size = 4)+
   geom_line(data = best_data %>% filter(is.na(gemessen)), 
             aes(y=laktat, color ="best", linetype = datum),
@@ -347,16 +275,19 @@ laktat_trend_calc <- function(df, w_min = 100, w_max = 280){
 df %>% group_by(datum) %>% summarise(mean(laktat)) %>% ungroup()
 
 
-df <- laktat_selected %>% filter(is.na(gemessen) & 
-                                                  watt >= w_min &
-                                                  watt < w_max) %>% ungroup() %>%
+df <- df %>% filter(is.na(gemessen) & 
+                    watt >= w_min &
+                    watt < w_max) %>% 
+             ungroup() %>%
                               mutate(laktat = round(laktat,1)) %>% 
                                   group_by(laktat, datum) %>% 
                                         summarise(watt = mean(watt)) %>% 
                               mutate(watt = round(watt,1)) %>% ungroup()
 
+# mean laktat value / watt
 laktat_mean <- df  %>% group_by(watt) %>% 
                                         summarise(laktat_mean = mean(laktat))
+#mean laktat value
 laktat_mean_total <- laktat_mean %>% ungroup() %>% 
                                         summarise(laktat_mean = mean(laktat_mean)) %>% 
                                           mutate(laktat_mean = round(laktat_mean,1)) %>% pull()
@@ -374,7 +305,8 @@ p1 <-laktat_trend %>%
   geom_line(aes(y = laktat_diff))+
   geom_line(aes(y = 0), linetype = 2)+
   labs(y = "Mean difference [mmol]",
-       title = str_c("difference of calculated Laktatvalues to the mean of ",laktat_mean_total," mmol (", w_min, "W-",w_max,"W)"))+
+       title = str_c("difference of calculated Laktatvalues to the mean (", w_min, "W-",w_max,"W)"),
+       subtitle = str_c("mean Laktatvalue of ", laktat_mean_total," mmol for ", w_min, "W-",w_max,"W"))+
   theme_light()
 
 #return(laktat_trend)
