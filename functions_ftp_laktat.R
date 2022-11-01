@@ -67,7 +67,8 @@ ftp_calculation <- function(data_raw, date_selected){
 ###---------------------------calculation of 2mmol Watt
 ### with nonlineare regression model
 
-watt_2mmol <- function(d){
+watt_2mmol <- function(d, start_b = 0.1){
+  #start_b was 1, but 0.1 works better
   
   result <-tibble()
   #fehlmessungen filter: (laktat muss steigen)
@@ -75,7 +76,7 @@ watt_2mmol <- function(d){
                                                              default =0)) %>% 
     filter(ungueltig >0) %>% select(-ungueltig)
   
-  model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=1))
+  model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=start_b))
   
   
   

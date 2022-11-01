@@ -26,20 +26,24 @@ generate_season_summary <- function(lactat_data, data_gc, duration_weeks){
     activities_data <- dates %>% left_join(data_gc, by = "date")  
     activities_data <- activities_data %>% filter(duration >0)
     
-    activites_aggregated_list[[i]] <- activities_data %>% 
-      mutate(long = case_when(duration >= 3 ~ 1, TRUE ~ 0),
-             high_TSS = case_when(TSS > 100 ~1, TRUE ~ 0)) %>%
-      
-      summarise(n = n(),
-                n_long = sum(long, na.rm = TRUE),
-                n_high_TSS = sum(high_TSS, na.rm = TRUE),
-                TSS = sum(TSS, na.rm = TRUE),
-                duration = sum(duration, na.rm = TRUE),
-                watt = mean(w_mean, na.rm = TRUE)) %>%
-      mutate(date_test = date_end,
-             watt_2mmol = !!watt_2mmol,
-             watt_5mmol = !!watt_5mmol)
+    aggregation_1 <- activities_data %>% 
+                            mutate(long = case_when(duration >= 3 ~ 1, TRUE ~ 0),
+                                   high_TSS = case_when(TSS > 100 ~1, TRUE ~ 0)) %>%
+                            
+                            summarise(n = n(),
+                                      n_long = sum(long, na.rm = TRUE),
+                                      n_high_TSS = sum(high_TSS, na.rm = TRUE),
+                                      TSS = sum(TSS, na.rm = TRUE),
+                                      duration = sum(duration, na.rm = TRUE)) %>%
+                            mutate(date_test = date_end,
+                                   watt_2mmol = !!watt_2mmol,
+                                   watt_5mmol = !!watt_5mmol)
     
+    aggregation_watt <- activities_data %>% filter(w_mean>0) %>%
+                              summarise(n_bike = n(),
+                                        watt = mean(w_mean, na.rm = TRUE))
+    
+    activites_aggregated_list[[i]]  <- aggregation_1 %>% bind_cols(aggregation_watt)
   }
   
   result= bind_rows(activites_aggregated_list) %>% 

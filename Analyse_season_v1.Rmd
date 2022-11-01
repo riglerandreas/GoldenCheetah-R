@@ -40,16 +40,16 @@ ftp_laktat <- 5  #bei wieviel mmol ca FTP - bei mir sind es ziemlich genau 5mmol
 
 path_laktat <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
 
-data <- read_excel(str_c(path_laktat,"Laktat.xls"))
+data_laktat <- read_excel(str_c(path_laktat,"Laktat.xls"))
 
-data <- data %>% rename(watt = Watt,
+data_laktat <- data_laktat %>% rename(watt = Watt,
                         laktat = Laktat,
                         datum = Datum,
                         person = Person,
                         inervall_dauer = Intervalllänge)
 
 
-data <- data %>% mutate(year =year(datum),
+data_laktat <- data_laktat %>% mutate(year =year(datum),
                            month=month(datum))
 
 
@@ -62,25 +62,28 @@ data <- data %>% mutate(year =year(datum),
 
 
 ```{r message=FALSE, warning=FALSE}
-date_list <- data %>% distinct(datum)
+date_list <- data_laktat %>% distinct(datum)
 
 laktat_list <- list()
 for (i in seq_along(date_list$datum)) {
   
   date_selected <- date_list[i,] %>% pull()
-  data_selected <- data %>% filter(datum == date_selected)
-  
+  data_selected <- data_laktat %>% filter(datum == date_selected)
+  laktat_list[i]$nr <- i
+  laktat_list[[i]]$date <- date_selected
+    
   try(laktat_list[[i]] <- watt_2mmol(data_selected))
   try(laktat_list[[i]]$watt_5mmol <- watt_xmmol(data_selected,5))
   
-  laktat_list[i]$nr <- i
-  laktat_list[[i]]$date <- date_selected
-  #print(date_list[i,])
+
 }
 
 
 laktat_watt <- bind_rows(laktat_list) %>% arrange(date)
+
 ```
+
+
 
 2020-07-07: hoch wirkt plausibel 
 2021-10-14: hoch interessant und plausibel
@@ -121,13 +124,7 @@ zuerst:
 - intervall data
 
 
-## ???
-```{r}
-path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
 
-
-training_data_season <-read_rds(str_c(path_laktat_ftp,"Results/season_data_count.rds"))
-```
 
 ### Read export data from Goldencheetah
 
@@ -140,6 +137,12 @@ data_gc <- prepare_gc_summary(data_gc)
                                                                                             
 data_gc %>% arrange(desc(date))
 ```
+
+```{r}
+test = c(10,10,10,NA)
+mean(test,na.rm=TRUE)
+```
+
 
 #### Summarise the metrics for each season
 
@@ -157,6 +160,14 @@ data_season_all <- generate_season_summary(lactat_data = laktat_watt, data_gc = 
 
 data_season %>% arrange(date_test) %>% select(year, date_test, everything())
 ```
+
+```{r}
+
+data_season_all <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, weeks_per_season)
+
+data_season %>% arrange(date_test) %>% select(year, date_test, everything())
+```
+
 
 
 ```{r}
@@ -184,7 +195,7 @@ weeks_correlation_all_list_5 <- list()
 col_2mmol <- c("watt_2mmol")
 col_5mmol <- c("watt_5mmol")
 
-col_variables <- c( "TSS", "duration", "n_long", "watt")
+col_variables <- c( "TSS", "duration", "n_long","watt") #not inkluding  because 
 col_selected_2 <- c(col_2mmol, col_variables)
 col_selected_5 <- c(col_5mmol, col_variables)
 
@@ -211,73 +222,302 @@ corr_5mmol_all <- bind_rows(weeks_correlation_all_list_5) %>% pivot_longer(cols 
 
 
 ```{r}
-corr_2mmol %>%
+
+plot_corr <- function(df){
+  p_cor <- df %>%
 
   ggplot(aes(x = weeks))+
-  geom_line(aes(y= value, color = name))+
-  labs(title = "selected seasons: correleation between 2 mmol watt considering weeks / season",
-       y = "correlation coefficient",
-       x = "weeks per season",
-       color = "features")+
-  geom_hline(yintercept = c(0.5,0.75), linetype = 3)+
-  coord_cartesian(ylim = c(0.3,0.9))+
-  theme_light()
-
-```
-
-```{r}
-corr_5mmol %>%
-
-  ggplot(aes(x = weeks))+
-  geom_line(aes(y= value, color = name))+
-  labs(title = "selected seasons: correleation between 5 mmol watt considering weeks / season",
-       y = "correlation coefficient",
-       x = "weeks per season",
-       color = "features")+
-  geom_hline(yintercept = c(0.5,0.75), linetype = 3)+
-  coord_cartesian(ylim = c(0.3,1))+
-  theme_light()
-
-```
-
-```{r message=FALSE, warning=FALSE}
-
-
-col_selected <- c("watt_5mmol", "TSS", "duration", "n_long")
-
-correlation_5mmol(data_season, col_selected)
-```
-
-
-```{r}
-
-weeks = c(1:20)
-
-weeks_correlation_list <- list()
-
-
-col_mmol <- c("watt_5mmol")
-col_variables <- c( "TSS", "duration", "n_long")
-col_selected <- c(col_mmol, col_variables)
-
-for (i in seq_along(weeks)) {
+      geom_line(aes(y= value, color = name))+
+      labs(
+           y = "correlation coefficient",
+           x = "weeks per season",
+           color = "features")+
+      geom_hline(yintercept = c(0.5,0.75), linetype = 3)+
+      #coord_cartesian(ylim = c(0.3,1))+
+      theme_light() 
   
-  data_season <- generate_season_summary(lactat_data = seasons_laktat_watt, data_gc = data_gc, weeks[i])
-  weeks_correlation_list[[i]] = correlation_5mmol(data_season, col_selected) %>% mutate(weeks = !!weeks[i])
+  return(p_cor)
   
 }
 
-bind_rows(weeks_correlation_list) %>%
-      pivot_longer(cols = col_variables) %>%
-
-  ggplot(aes(x = weeks))+
-  geom_line(aes(y= value, color = name))+
-  labs(title = "correleation between 5 mmol watt considering weeks / season")+
-  coord_cartesian(ylim = c(0.3,1))+
-  theme_light()
+plot_corr(corr_2mmol ) +
+  labs(title = "selected seasons: correleation between 2 mmol watt considering weeks / season")
 
 ```
 
-- vielleicht mal mit allen season (laktat tests probieren)
-und analysieren!
+```{r}
+plot_corr(corr_5mmol) +
+  labs(title = "selected seasons: correleation between 5 mmol watt considering weeks / season")
+```
+
+warum watt so hohe korrelation über so langen zeitraum? 
+
+1. fittnes -> watt
+oder
+2. watt -> fittnes
+
+
+fittnes -> watt:
+A: 
+mmol_t1 > mmol_tn
+watt_t1 > watt_tn
+
+--> watt_tn-1 > watt_tn
+
+B: 
+mmol_t1 < mmol_tn
+watt_t1 < watt_tn
+
+--> watt_tn-1 < watt_tn
+
+bei besseren testergebnissen muß w kleiner werden mit höheren wochenzahl
+bei schlechterem testergebnissen muß w größer werden mit höheren wochenzahl
+??
+
+Interessant negative correlation bei wenig wochen auch TSS hat schwächere korrelation
+-> was bedeuted das?
+(tageweise cor plotten wäre interresant)
+
+Korrelationsplot interpretation 1: über längeren zeitraum trainieren bringt mehr als kur (??)
+NEin sondern entscheidend für die performance sind die vorherigen 12 wochen, nicht so sehr die 5 vorm test
+
+TSS / watt_2mmol auch sehr interessant -> cluster links was ist das?
+was ist correlation eigentlich?
+
+2021-01-28 219W 2mmol wirkt wie fehlmessung, besser nicht berücksichtigen
+
+```{r}
+plot_data_12 <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, 12)
+plot_data_4 <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, 4) 
+plot_data_6 <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, 4) 
+
+plot_data_12%>%
+  ggplot(aes(x=TSS))+
+  geom_point(aes(y=watt_5mmol, color ="5mmol"))+
+geom_point(aes(y=watt_2mmol, color ="2mmol"))+
+  scale_color_manual(values=c("#00BFC4","#F8766D"))+
+  labs(title ="12 Wochen",
+       subtitle = "Warum hoher TSS, niedrige 2mmol?",
+       y= "watt",
+        color = "mmol")+
+  theme_light()
+```
+
+```{r}
+plot_data_12%>%
+  ggplot(aes(x=duration))+
+  geom_point(aes(y=watt_2mmol, color ="12"))+
+geom_point(data = plot_data_4, aes(y=watt_2mmol, color ="4"))+
+  geom_point(data = plot_data_6, aes(y=watt_2mmol, color ="6"))+
+  geom_vline(xintercept = 70,linetype = 2)+
+  geom_hline(yintercept = 185, linetype = 2)+
+  labs(title = "2mmol",
+       color = "Weeks")+
+  theme_light()
+```
+
+```{r}
+plot_data_12 <- plot_data_12%>% mutate(category = case_when(watt_2mmol < 185 ~ "low mmol",
+                                                            duration < 70 ~ "low duration",
+                                                            watt_2mmol > 215 ~ "high mmol",
+                                                            TSS > 3700 ~ "high TSS"))
+
+plot_data_12_clean <- plot_data_12 %>% mutate(date_test = as.character(date_test)) %>% 
+                                            filter(date_test != "2021-01-28") %>% 
+                                      mutate(date_test = as.Date(date_test))
+```
+
+
+```{r}
+plot_data_12%>%
+  ggplot(aes(x=duration))+
+  geom_point(aes(y=watt_2mmol, color =category))+
+  geom_vline(xintercept = 70,linetype = 2)+
+  geom_hline(yintercept = 185, linetype = 2)+
+  labs(title = "2mmol")+
+  theme_light()
+```
+
+```{r}
+plot_data_12%>%
+  ggplot(aes(x=duration))+
+  geom_point(aes(y=watt_2mmol, color =category))+
+  #geom_vline(xintercept = 70,linetype = 2)+
+  #geom_hline(yintercept = 185, linetype = 2)+
+  labs(title = "2mmol")+
+  theme_light()
+```
+
+Wenn man die Werte als Linien betrachtet kann die verteilung sinn ergeben. 
+Vielleicht gibts einen zusammenhang mit dem Jahr - bei gutem jahr höhere werte als bei schlechtem
+
+Bestätigt sich, nur 2022 ist seltsam:
+
+```{r}
+plot_data_12%>% arrange(duration) %>%
+  ggplot(aes(x=duration))+
+  geom_point(aes(y=watt_2mmol, color =year))+
+  geom_line(aes(y=watt_2mmol, group = year,color =year))+
+  geom_vline(xintercept = 70,linetype = 2)+
+  geom_hline(yintercept = 185, linetype = 2)+
+  labs(title = "2mmol")+
+  theme_light()
+```
+
+#### Im Jahresverlauf
+
+Ziemlich interessant, 2021 war ein ziemlich gutes jahr, schon sehr früh hohe w (200!)
+
+```{r}
+plot_2mmol_month <- plot_data_12_clean %>% mutate(month = month(date_test)) %>%
+  ggplot(aes(x=month))+
+  geom_point(aes(y=watt_2mmol, color =year))+
+  geom_line(aes(y=watt_2mmol, group = year,color =year))+
+  labs(title = "2mmol")+
+  theme_light()
+
+plot_2mmol_month
+```
+
+2020 war ein ziemlich seltsames jahr bez 5mmol. hat lange gedauert bis nach oben, aber dann super wert
+was war da??
+
+Vielleicht:
+Viel laufen
+am 2.3. erste längere ausfahrt - war anstrengend - 
+2020 ..  > 3h 2.3., 30.4., 22.5., 8.6., 9.7., 2.8.
+2021 ..  > 3h 6.1., 18.2. 30.3.
+
+```{r}
+plot_data_12_clean %>% mutate(month = month(date_test)) %>%
+  ggplot(aes(x=month))+
+  geom_point(aes(y=watt_5mmol, color =year))+
+  geom_line(aes(y=watt_5mmol, group = year,color =year))+
+  labs(title = "5mmol")+
+  theme_light()
+```
+
+```{r}
+plot_data_12_clean %>% mutate(month = month(date_test)) %>%
+  ggplot(aes(x=month))+
+  geom_point(aes(y=n_long, color =year))+
+  geom_line(aes(y=n_long, group = year,color =year))+
+  labs(title = "n_long")+
+  theme_light()
+```
+
+```{r}
+plot_data_12_clean %>% mutate(month = month(date_test)) %>%
+  ggplot(aes(x=n_long))+
+  geom_point(aes(y=watt_2mmol, color =year))+
+  geom_line(aes(y=watt_2mmol, group = year,color =year))+
+  labs(title = "n_long")+
+  theme_light()
+```
+
+```{r}
+plot_wdiff_month <- plot_data_12_clean %>% mutate(month = month(date_test),
+                              watt_diff = watt_5mmol - watt_2mmol) %>%
+  ggplot(aes(x=month))+
+  geom_point(aes(y=watt_diff, color =year))+
+  geom_line(aes(y=watt_diff, group = year,color =year))+
+  labs(title = "5mmol - 2mmol")+
+  theme_light()
+
+plot_wdiff_month /
+plot_2mmol_month
+```
+
+Ansatz:
+Was war bei season 2022_01 ?? fehlmessung
+Laktatkurve ansehen - Meßwerte glaubwürdig?
+2022 diff deutlich höher - mehr arbeit an schwelle ??
+2021 ziemlich niedrig  - mehr ga1 ??
+
+```{r}
+plot_data_12_longer <- plot_data_12_clean %>% pivot_longer(cols = c(duration, TSS, n_high_TSS, n_long)) 
+
+plot_high_2020 <- plot_data_12_longer %>% filter( watt_2mmol> 200)
+
+
+plot_data_12_longer%>%
+  ggplot(aes(x = year, color = year))+
+  geom_boxplot(aes(y=value))+
+  geom_point(aes(y=value), width = 0.2)+
+  geom_point(data = plot_high_2020,aes(y=value), size= 3)+
+  facet_wrap(name~., scales = "free_y")+
+  theme_light()
+```
+
+## One Year Season
+
+angeregt durch twitter: training muß auf lange sicht betrachtet werden 
+
+betrachtet man das zurückliegende jahr, so ist die duration und die TSS das wichtigste
+n_long nicht so wichtig
+ist aber etwas schwammig
+auf der anderen seite beim vergleich mit 12 wochen:
+- bei 12 wochen kein wirklicher unterschied, bzw nicht klar warum 2021 so gut im vergleich war
+- bein eineam jahr wirkt es dagegen doch sehr eindeutig (sieht man das, was man sehen möchte?)
+
+
+```{r}
+plot_data_year <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, 52)
+```
+
+```{r}
+plot_data_year_longer <- plot_data_year %>% pivot_longer(cols = c(duration, TSS, n_high_TSS, n_long, watt)) 
+
+plot_high_year <- plot_data_year_longer %>% filter( watt_2mmol> 200)
+
+
+plot_data_year_longer%>%
+  ggplot(aes(x = year, color = year))+
+  geom_boxplot(aes(y=value))+
+  geom_point(aes(y=value), width = 0.2)+
+  geom_point(data = plot_high_year, aes(y=value), size= 3)+
+  facet_wrap(name~., scales = "free_y")+
+  theme_light()
+```
+
+
+```{r}
+plot_data_year%>%
+  ggplot(aes(x=duration))+
+  geom_point(aes(y=watt_2mmol, color =year))+
+  geom_line(aes(y=watt_2mmol, color =year))+
+  geom_vline(xintercept = 350,linetype = 2)+
+  geom_hline(yintercept = 185, linetype = 2)+
+  labs(title = "2mmol",
+       color = "Weeks")+
+  theme_light()
+```
+
+```{r}
+plot_data_year%>%
+  ggplot(aes(x=TSS))+
+  geom_point(aes(y=watt_2mmol, color =year))+
+  geom_line(aes(y=watt_2mmol, color =year))+
+  #geom_vline(xintercept = 70,linetype = 2)+
+  geom_hline(yintercept = 185, linetype = 2)+
+  labs(title = "2mmol",
+       color = "Weeks")+
+  theme_light()
+```
+
+Als nächstes intervalle einbinden!s
+
+## Intrvalle
+
+## Import Intervals
+```{r}
+path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+file_name_intervals_result <- "Results/intervals_result.rds"
+
+intervals_result <- read_rds(str_c(path_laktat_ftp, file_name_intervals_result))
+```
+
+```{r}
+select_ftp_mmol(intervals_result_cat)
+```
 
