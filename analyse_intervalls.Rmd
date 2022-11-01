@@ -171,14 +171,19 @@ intervals_result_cat %>% filter(date > "2020-08-01" &
   geom_point(aes(y = w_5mmol, col ="w_5mmol"),alpha = 1/10)
 ```
 
+Vergleich der werte w_5mmol und ftp mit ergebnis der funktion
+
 ```{r}
 
 
 select_ftp_mmol(intervals_result_cat) %>%  #filter(date > "2021-10-01") %>%
   ggplot(aes(x = date))+ 
-  geom_step(aes(y = ftp_mmol))+
+  geom_step(aes(y = ftp_mmol, color = "result"))+
   geom_point(aes(y = ftp, col ="ftp"),alpha = 1)+
-  geom_point(aes(y = w_5mmol, col ="w_5mmol"),alpha = 1)
+  geom_point(aes(y = w_5mmol, col ="w_5mmol"),alpha = 1)+
+  labs(title = "test the select_ftp_mmol function",
+       y = "W")+
+  theme_light()
 ```
 
 
