@@ -15,72 +15,7 @@ prepare_gc_summary <- function(df){
     
     return(df)
 }
-#=============================== GC Intervall activity data =============================  
-#------------------------- Get Intervall data:------------------------------------------
 
-get_intervals <- function(data_ride){
-  library(zoo)
-  
-  intervals_gc_list <- data_ride$RIDE$INTERVALS
-  
-  intervals_n <- intervals_gc_list %>% length()
-  
-  intervals_list <- c()
-  for (i in c(1:intervals_n)) {
-    intervals_list[[i]] <- tibble(
-      interval_name = intervals_gc_list[[i]]$NAME,
-      interval_start = intervals_gc_list[[i]]$START,
-      #interval_ptest = intervals_gc_list[[i]]$PTEST
-    ) %>% 
-      mutate(interval_start = abs(interval_start),
-             interval_name = case_when(is.null(interval_name) ~" ",TRUE ~interval_name))
-    
-  }
-  
-  
-  interval <- intervals_list %>% bind_rows() %>% arrange(interval_start)
-  
-  # get the ride data
-  ridedata_list <- data_ride[[1]]$SAMPLES
-  ridedata <- bind_rows(ridedata_list)
-  
-  
-  
-  #join with intervals
-  ridedata_joined <- ridedata %>% left_join(interval, 
-                                            by = c("SECS" = "interval_start")) %>%
-    arrange(SECS)     
-  
-  #fill NA
-  ridedata_interval <- ridedata_joined %>% 
-                            #filter so that the first value is not Null
-                      filter(SECS >= !!intervals_list[[1]]$interval_start ) %>%
-                            mutate(interval_name = na.locf(interval_name),
-                                  #interval_ptest = na.locf(interval_ptest)
-                                  )
-  
-  #aggregate
-  interval_aggregation <- ridedata_interval %>% group_by(interval_name) %>% #interval_ptest
-    
-    summarise(interval_watt = mean(WATTS, na.rm = TRUE),
-              interval_hr = mean(HR, na.rm = TRUE),
-              interval_hr_max = max(HR, na.rm = TRUE),
-              interval_hr_min = min(HR, na.rm = TRUE),
-              interval_sec = n())
-  
-  
-  interval_aggregation <- interval_aggregation %>% 
-    mutate(#file_name = files_selected$file_name[i],
-      workout_code = as.character(data_ride$RIDE$TAGS$`Workout Code`),
-      device = data_ride$RIDE$TAGS$Rad,
-      start_time = data_ride$RIDE$STARTTIME,
-      date = as.Date(start_time)) %>% select(date, workout_code, everything())
-  
-  
-  
-  
-  return(interval_aggregation)
-}
 
 
 #-----------Movement time:

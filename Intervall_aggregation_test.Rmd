@@ -1,0 +1,236 @@
+---
+title: "Intervall_aggregation_test"
+author: "ari"
+date: '2022-11-11'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+library("jsonlite")
+
+
+#custom funcitons
+source("functions_ftp_laktat.R")
+source("functions_import.R")
+
+source("functions_intervall.R")
+
+```
+
+
+```{r}
+
+pfad_aktivity <- "C:/Users/rigle/AppData/Local/GoldenCheetah/Andl/activities/" 
+
+```
+
+Liste der json files:
+
+```{r}
+files <- list.files(pfad_aktivity)
+
+
+files <- tibble(file_name = files)
+
+files <- files %>% mutate(file_date = str_sub(file_name,1,10),
+                          file_year = str_sub(file_name,1,4))
+
+count(files)
+```
+
+```{r}
+
+
+choose_files(files, "2022-11-07","2022-11-11")
+```
+
+```{r}
+source("functions_intervall.R")
+
+read_and_agg_intervals(pfad_aktivity,files, "2022-11-07","2022-11-11")  
+
+```
+
+###  Import Intervals
+```{r}
+path_laktat <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+file_name_intervals_result <- "Results/intervals_result.rds"
+
+intervals_result_raw <- read_rds(str_c(path_laktat, file_name_intervals_result))
+```
+
+```{r}
+intervals_result_raw %>% filter(interval_watt > 240) %>% group_by(year(date)) %>%
+  count()
+```
+
+
+
+
+```{r}
+intervals_result <- intervals_result_raw %>%
+  
+  mutate(year= as.factor(year(date)),
+       interval_min = interval_sec/60) %>%
+  
+  
+  filter(interval_min >= 1  )%>% group_by(date, workout_code) %>% 
+  mutate(interval_mean_w = mean(interval_watt),
+         interval_median_w = median(interval_watt)) %>% #ungroup() %>%
+  mutate(interval = case_when(interval_watt > interval_mean_w*1.2 ~ TRUE, TRUE ~ FALSE),
+         interval_med = case_when(interval_watt > interval_median_w*1.2 ~ TRUE, TRUE ~ FALSE)) %>%
+    ungroup()
+
+intervals_result
+```
+
+```{r}
+intervals_result %>% #group_by(date, workout_code) %>% summarise(interval = sum(interval)) %>%
+  #filter(interval == 0) %>% 
+  #filter(str_detect(workout_code, fixed("SST ", ignore_case = TRUE))) 
+filter(date == "2020-04-24")
+```
+
+Interval_Watt sind falsch!
+
+```{r}
+source("functions_intervall.R")
+
+read_and_agg_intervals(pfad_aktivity,files, "2020-04-24","2020-04-24") 
+```
+
+```{r}
+file_sel <- choose_files(files, "2020-04-24","2020-04-24") 
+file_sel
+```
+
+```{r}
+
+
+data_ride <- read_gc_data(pfad_aktivity, file_sel)
+
+ridedata <- get_activity_data(data_ride)
+
+intervals <- get_activity_intervals(data_ride)
+intervals %>% mutate(min = interval_start/60)
+
+seq(min(ridedata$SECS),
+                                                   max(ridedata$SECS), 
+                                                   by= 1)
+```
+
+
+
+
+```{r}
+
+
+label_intervals(ridedata, intervals) %>% group_by(interval_name) %>% filter(!is.na(WATTS)) %>% 
+        summarise(watt = mean(WATTS,na.rm = TRUE),
+                  hr = round(mean(HR, na.rm = TRUE)),
+                  secs = n(),
+                  min = round(secs/60,1)) 
+  
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+
+```{r}
+
+
+
+
+
+
+
+file_sel <- choose_files(files, "2021-10-11","2021-10-11") 
+intervals <- read_intervals(pfad_aktivity, file_sel)
+intervals
+#add_activity_info(intervals, data_ride, file_sel)
+```
+
+
+```{r}
+get_intervals <- function(data_ride){
+  library(zoo)
+  
+  intervals_gc_list <- data_ride$RIDE$INTERVALS
+  
+  intervals_n <- intervals_gc_list %>% length()
+  
+  intervals_list <- c()
+  for (i in c(1:intervals_n)) {
+    intervals_list[[i]] <- tibble(
+      interval_name = intervals_gc_list[[i]]$NAME,
+      interval_start = intervals_gc_list[[i]]$START,
+      #interval_ptest = intervals_gc_list[[i]]$PTEST
+    ) %>% 
+      mutate(interval_start = abs(interval_start),
+             interval_name = case_when(is.null(interval_name) ~" ",TRUE ~interval_name))
+    
+  }
+  
+  
+  interval <- intervals_list %>% bind_rows() %>% arrange(interval_start)
+  
+  # get the ride data
+  ridedata_list <- data_ride[[1]]$SAMPLES
+  ridedata <- bind_rows(ridedata_list)
+  
+  
+  
+  #join with intervals
+  ridedata_joined <- ridedata %>% left_join(interval, 
+                                            by = c("SECS" = "interval_start")) %>%
+    arrange(SECS)     
+  
+  #fill NA
+  ridedata_interval <- ridedata_joined %>% 
+    #filter so that the first value is not Null
+    filter(SECS >= !!intervals_list[[1]]$interval_start ) %>%
+    mutate(interval_name = na.locf(interval_name),
+           #interval_ptest = na.locf(interval_ptest)
+    )
+  
+  #aggregate
+  interval_aggregation <- ridedata_interval %>% group_by(interval_name) %>% #interval_ptest
+    
+    summarise(interval_watt = mean(WATTS, na.rm = TRUE),
+              interval_hr = mean(HR, na.rm = TRUE),
+              interval_hr_max = max(HR, na.rm = TRUE),
+              interval_hr_min = min(HR, na.rm = TRUE),
+              interval_sec = n())
+  
+  
+  interval_aggregation <- interval_aggregation %>% 
+    mutate(#file_name = files_selected$file_name[i],
+      workout_code = as.character(data_ride$RIDE$TAGS$`Workout Code`),
+      device = data_ride$RIDE$TAGS$Rad,
+      start_time = data_ride$RIDE$STARTTIME,
+      date = as.Date(start_time)) %>% select(date, workout_code, everything())
+  
+  #TSS
+
+  
+  
+  return(interval_aggregation)
+}
+```
+
+
