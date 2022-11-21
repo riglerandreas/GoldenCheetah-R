@@ -43,19 +43,27 @@ read_intervals <- function(pfad_aktivity, file_name){
   
   data_ride <- read_gc_data(pfad_aktivity, file_sel)
   
-  ridedata <- get_activity_data(data_ride)
-  
-  intervals <- get_activity_intervals(data_ride)    
-  
-  intervals <- label_intervals(ridedata, intervals)
-  
-  intervals_agg <- aggregate_activity_intervals(intervals)
-  result <- add_activity_info(intervals_agg, data_ride, file_sel)
-  
-  result <- result %>% select(date, workout_code, interval_name, min, everything())
-  
-  
-  return(result)
+  # check if there is any ridedata
+  if (!is.null(data_ride[[1]]$SAMPLES)) {
+    # check if there is any intervall information
+    if (!is.null(data_ride$RIDE$INTERVALS)) {
+        
+        ridedata <- get_activity_data(data_ride)
+        
+        intervals <- get_activity_intervals(data_ride)    
+        
+        intervals <- label_intervals(ridedata, intervals)
+        
+        intervals_agg <- aggregate_activity_intervals(intervals)
+        result <- add_activity_info(intervals_agg, data_ride, file_sel)
+        
+        result <- result %>% select(date, workout_code, interval_name, min, everything())
+        
+        
+        return(result)
+    }
+  }
+
   
 }
 
@@ -139,6 +147,10 @@ label_intervals <- function(ridedata, intervals){
 
 
 aggregate_activity_intervals <- function(df){
+  
+  if (sum(names(df) =="HR") == 0) { df <- df %>% mutate(HR = 0)}
+  if (sum(names(df) =="WATTS") == 0) { df <- df %>% mutate(WATTS = 0)}
+  if (sum(names(df) =="CAD") == 0) { df <- df %>% mutate(CAD = 0)}
   #aggregae the ridedata grouped by interval
   result <- df %>% group_by(interval_name) %>% filter(!is.na(WATTS) &
                                                         WATTS > 0 ) %>% 
@@ -154,10 +166,20 @@ aggregate_activity_intervals <- function(df){
 
 
 add_activity_info <- function(df, data_ride, file_name){
+  
+  if (sum(names(data_ride$RIDE$TAGS) =="Workout Code") == 0) { 
+        workout_code <- ""}else{
+        workout_code <- as.character(data_ride$RIDE$TAGS$`Workout Code`)}
+  
+  if (sum(names(data_ride$RIDE$TAGS) =="Rad") == 0) { 
+      device_name <- ""}else{
+        device_name <- as.character(data_ride$RIDE$TAGS$Rad)}
+  
+  
   #add the main acitvity infos to the intervals
   df <- df %>% mutate(file_name = !!file_name$file_name,
-                      workout_code = as.character(data_ride$RIDE$TAGS$`Workout Code`),
-                      device = data_ride$RIDE$TAGS$Rad,
+                      workout_code = !!workout_code,
+                      device = !!device_name,
                       start_time = data_ride$RIDE$STARTTIME,
                       date  = as.Date(start_time))
   
