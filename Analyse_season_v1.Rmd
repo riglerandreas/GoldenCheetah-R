@@ -41,17 +41,17 @@ ftp_laktat <- 5  #bei wieviel mmol ca FTP - bei mir sind es ziemlich genau 5mmol
 path_laktat <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
 
 #read Laktat test values
-data_laktat <- read_excel(str_c(path_laktat,"Laktat.xls"))
+data_laktat_measurements <- read_excel(str_c(path_laktat,"Laktat.xls"))
 
-data_laktat <- data_laktat %>% rename(watt = Watt,
+data_laktat_measurements <- data_laktat_measurements %>% rename(watt = Watt,
                         laktat = Laktat,
-                        datum = Datum,
+                        date = Datum,
                         person = Person,
                         inervall_dauer = Intervalllänge)
 
 
-data_laktat <- data_laktat %>% mutate(year =year(datum),
-                           month=month(datum))
+data_laktat_measurements <- data_laktat_measurements %>% mutate(year =year(date),
+                           month=month(date))
 
 
 ```
@@ -60,93 +60,24 @@ data_laktat <- data_laktat %>% mutate(year =year(datum),
 
 ### 2mmol Progress
 
-```{r}
-data_test <- data_laktat %>% filter(as.Date(datum) == as.Date("2018-06-25"))
 
-
-dates <- data_laktat %>% distinct(datum)
-
-watt_2mmol_test <- function(d, start_b = 0.1){
-  #start_b was 1, but 0.1 works better
-  
-  result <-tibble()
-  #fehlmessungen filter: (laktat muss steigen)
-  d <- d %>% arrange(watt) %>% mutate(ungueltig = laktat-lag(laktat, 
-                                                             default =0)) %>% 
-    filter(ungueltig >0) %>% select(-ungueltig)
-  
-  model_laktat <- nls(watt~a*log(b*laktat),data = d,start = list(a=10,b=start_b))
-  
-  
-  
-  laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
-    add_predictions(model_laktat,"watt") 
-  date <- d %>% summarise(mean(datum)) %>% pull()
-  watt <- laktat_prediction %>% filter(laktat <= 2) %>% summarise(watt = max(watt)) %>% pull()
-  
-  result <- tibble("date" = date,
-                   "watt_2mmol" = watt)
-  return(laktat_prediction)
-}
-
-```
 
 
 ```{r}
-laktat_watt_raw <- read_csv2(str_c(path_laktat,"laktat_watt.csv"))
-laktat_watt <-laktat_watt_raw #%>% rename(date = datum)
+laktat_results<- read_csv2(str_c(path_laktat,"laktat_watt.csv")) %>% mutate(date = as.Date(date, format = "%d.%m.%Y"))
+laktat_results 
 ```
+
 
 
 #### Check dates mmol values
+
 ```{r}
-dates_all <- tibble(date = c(as.character(dates$datum),as.character(laktat_watt$datum))) %>%
-               mutate(duplicated = duplicated(date)) %>% 
-                  filter(duplicated == FALSE) %>% arrange(date)
 
 
-
-                    
-for (i in seq_along(dates_all$date)) {
-
-data_test <- data_laktat %>% filter(as.Date(datum) == as.Date(dates_all$date[i]))  
-try
-as.character(dates$datum[i])
-mmol_sel <- laktat_watt %>% filter(as.character(datum) == as.character(dates_all$date[i]))  
-mmol_sel
-
-
-
-plot_1 <- data_test %>% ggplot(aes(y=laktat)) + 
-                geom_point(aes(x= watt)) + 
-                geom_line(aes(x= watt)) + 
-                  geom_hline(yintercept = c(2,5))+
-                  geom_vline(xintercept = c(190,200,210, 240,250,260,270), linetype =1, color = "red")
-  
-
-  if (dim(mmol_sel)[1]>0) {
-    plot_1 <- plot_1 + 
-  geom_point(data = mmol_sel,aes(x = w_5mmol, y=5, color = "calc"), size =5)+
-    geom_point(data = mmol_sel,aes(x = w_2mmol, y=2, color = "calc"), size =5)+ 
-            labs(subtitle = str_c("2 mmol: ",round(mmol_sel$w_2mmol, digits = 2),
-                                  "    5 mmol: ",round(mmol_sel$w_5mmol, digits = 2) ))
-  }
-
-data_predict <- c()
-try(data_predict <- watt_2mmol_test(data_test, start_b = 0.01), silent = TRUE)
-
-if (is_empty(c(data_predict)) == FALSE) {
-  plot_1 <- plot_1 + geom_point(data = data_predict,aes(x= watt))
-}    
-    
-plot_1 <- plot_1 + 
-            labs(title = str_c("date: ",dates$datum[i] ))+
-            theme_light()    
-
-  print(plot_1)
-}
-
+plot_laktat_curves(data_laktat_measurements,laktat_results)
 ```
+
 
 
 ```{r message=FALSE, warning=FALSE}
@@ -602,68 +533,80 @@ Check date compare with last - try to load and update newest
 ###  Import Intervals
 ```{r}
 
-file_name_intervals_result <- "Results/intervals_result.rds"
+data_intervals  <- read_csv2("Results/intervall_aggregation.csv")
+```
+```{r}
+watt_device <- function(df, device_list = c("BAsso_Vector", "P2M", "P2Cros", "P2MIndoor")){
+  df <- df %>% mutate(watt_device = case_when(device %in% device_list ~ TRUE, TRUE ~FALSE))
+  return(df)
+}
+```
 
-intervals_result <- read_rds(str_c(path_laktat, file_name_intervals_result))
+
+```{r}
+result_interval <- watt_device(data_intervals ) %>% filter(watt > 220 &
+                                                   watt_device == TRUE)%>% 
+                    mutate(year = lubridate::year(date),
+                           watt_secs = watt*secs) %>%
+                    filter(year %in% c(2017,2021,2022) ) %>% 
+                      group_by(year,date,workout_code) %>% 
+                          summarise(secs_sum = sum(secs),
+                                    watt_mean = sum(watt_secs)/secs_sum) %>%
+                            mutate(min = secs_sum/60,
+                                   duration = case_when(min < 30~ "< 30",
+                                                        min < 55 ~ "< 60",
+                                                        min < 85 ~ "< 90",
+                                                        TRUE ~ ">= 90")) 
+
+
+result_interval %>%
+  ggplot(aes(x =date))+ 
+  geom_point(aes(y=watt_mean, size = min, color =duration))+
+  geom_smooth(aes(y=watt_mean))+
+  geom_hline(yintercept = c(230, 250,260), linetype = 2)+
+  facet_wrap(year~., scales = "free_x", ncol = 1) +
+  coord_cartesian(ylim = c(200,350))+
+  theme_light()
 ```
 
 ```{r}
-intervals_result %>% filter(interval_watt > 240) %>% group_by(year(date)) %>%
-  count()
-```
-
-```{r}
-intervals_result %>%
+result_interval %>%
   
-  mutate(year= as.factor(year(date)),
-       interval_min = interval_sec/60) %>%
+  mutate(year= as.factor(year(date))) %>%
   
   
-  filter(interval_min >= 1 &
-           interval_min < 100 &
-           interval_watt > 200 &
-           year %in% c("2016","2017","2020", "2021", "2022")) %>%
+  filter(year %in% c("2016","2017","2020", "2021", "2022")) %>%
 #filter(year == "2020") %>%
   
-ggplot(aes(x=interval_min))+
-  geom_jitter(aes(y=interval_watt, color = year), alpha = 1)+
+ggplot(aes(x=min))+
+  geom_jitter(aes(y=watt_mean, color = year), alpha = 1)+
   #scale_x_log10()+
   theme_light()
 ```
 
 #### SST
 ```{r}
-data_plot_sst <- intervals_result %>%
+data_plot_sst <- result_interval %>%
   
-  mutate(year= as.factor(year(date)),
-       interval_min = interval_sec/60) %>%
+  mutate(year= as.factor(year(date))) %>%
   
-  
-  filter(interval_min >= 1 #&
-           #interval_min < 100 
-          # interval_watt > 250 
-         #  year %in% c("2016","2017","2020", "2021", "2022")
-         ) %>%
-#filter(year == "2020") %>%
 filter(str_detect(workout_code, fixed("SST ", ignore_case = TRUE))) 
 
 data_plot_sst_year <- data_plot_sst %>%
   
   group_by(year) %>% summarise(n = n(), 
-                               watt = mean(interval_watt, na.rm = TRUE),
-                               duration = sum(interval_sec/60)) %>%
-                    mutate
+                               watt = mean(watt_mean, na.rm = TRUE),
+                               duration = sum(min))  %>%
+                    mutate(date= as.Date(str_c(year,"-07-01")))
 
 
 data_plot_sst_labeled <-  data_plot_sst %>% group_by(date, workout_code) %>% 
-  mutate(interval_mean_w = mean(interval_watt),
-         interval_median_w = median(interval_watt)) %>% #ungroup() %>%
-  mutate(interval = case_when(interval_watt > interval_mean_w*1.2 ~ TRUE, TRUE ~ FALSE),
-         interval_med = case_when(interval_watt > interval_median_w*1.2 ~ TRUE, TRUE ~ FALSE)) %>%
+  mutate(interval_mean_w = mean(watt_mean),
+         interval_median_w = median(watt_mean)) %>% #ungroup() %>%
+  mutate(interval = case_when(watt_mean > interval_mean_w*1.2 ~ TRUE, TRUE ~ FALSE),
+         interval_med = case_when(watt_mean > interval_median_w*1.2 ~ TRUE, TRUE ~ FALSE)) %>%
     ungroup()
 
-data_plot_sst_labeled %>% 
-    filter(date == "2019-03-26") %>% ungroup() %>%select(date,interval_name, interval, interval_watt, interval_mean_w)
 ```
 
 ```{r}
@@ -687,13 +630,13 @@ data_plot_sst_labeled %>% group_by(date, workout_code) %>% summarise(interval = 
 
 
 ```{r}
-data_plot_sst_labeled %>% filter(date == "2020-04-24") %>%
+data_plot_sst_labeled %>% #filter(date == "2020-04-24") %>%
                           #filter(date > "2016-12-12" & date < "2017-01-01") %>%
   
-  select(date,interval_name, interval, interval_watt, interval_mean_w,interval_median_w,interval_med)
+#  select(date,interval_name, interval, interval_watt, interval_mean_w,interval_median_w,interval_med)
 
   ggplot(aes(x=date))+
-  geom_point(aes(y=interval_watt, color = interval))+
+  geom_point(aes(y=watt_mean, color = interval))+
   #geom_point(data = data_plot_sst_year, aes(y = watt, size = duration, color = year), alpha = 1/2)+
   #scale_size_continuous(range = c(20, 40))+
   labs(title = "intervalls with Vo2max in the description")+
