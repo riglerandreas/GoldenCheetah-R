@@ -219,7 +219,7 @@ plot_laktat_curves <- function(laktat_measurements, laktat_results){
     
     #Add title to the plot  
     plot_1 <- plot_1 + 
-      labs(title = str_c("date: ",dates_all$datum[i] ))+
+      labs(title = str_c("date: ",dates_all$date[i] ))+
       theme_light() 
     
     print(plot_1)

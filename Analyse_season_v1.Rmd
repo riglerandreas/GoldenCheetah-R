@@ -25,15 +25,11 @@ source("functions_import.R")
 source("functions_sesons.R")
 ```
 
-```{r}
-#https://www.r-bloggers.com/2019/03/adding-custom-fonts-to-ggplot-in-r/
-loadfonts(device = "win", quiet = TRUE)
-
-```
-
 
 ## Einlesen
 
+
+Read the Laktat Test measuremnt values:
 
 ```{r einlesen und bearbeiten}
 ftp_laktat <- 5  #bei wieviel mmol ca FTP - bei mir sind es ziemlich genau 5mmol
@@ -56,13 +52,7 @@ data_laktat_measurements <- data_laktat_measurements %>% mutate(year =year(date)
 
 ```
 
-
-
-### 2mmol Progress
-
-
-
-
+Read the list with the results for 2mmol, 4 mmol, 5mmol
 ```{r}
 laktat_results<- read_csv2(str_c(path_laktat,"laktat_watt.csv")) %>% mutate(date = as.Date(date, format = "%d.%m.%Y"))
 laktat_results 
@@ -70,7 +60,7 @@ laktat_results
 
 
 
-#### Check dates mmol values
+#### Check mmol values for all dates 
 
 ```{r}
 
@@ -80,27 +70,6 @@ plot_laktat_curves(data_laktat_measurements,laktat_results)
 
 
 
-```{r message=FALSE, warning=FALSE}
-date_list <- data_laktat %>% distinct(datum)
-
-laktat_list <- list()
-for (i in seq_along(date_list$datum)) {
-  
-  date_selected <- date_list[i,] %>% pull()
-  data_selected <- data_laktat %>% filter(datum == date_selected)
-  laktat_list[i]$nr <- i
-  laktat_list[[i]]$date <- date_selected
-    
-  try(laktat_list[[i]] <- watt_2mmol(data_selected))
-  try(laktat_list[[i]]$watt_5mmol <- watt_xmmol(data_selected,5))
-  
-
-}
-
-
-laktat_watt <- bind_rows(laktat_list) %>% arrange(date)
-
-```
 
 
 
@@ -114,17 +83,17 @@ laktat_watt <- bind_rows(laktat_list) %>% arrange(date)
 ```{r message=FALSE, warning=FALSE}
 seasons_slected <- tibble(date = c("2020-07-07", "2021-10-14", "2022-07-05", "2022-09-21", "2020-02-04", "2020-05-05"))
 
-seasons_laktat_watt <- laktat_watt %>% mutate(date = as.character(date)) %>% right_join(seasons_slected)  %>%
-  mutate( date = as.POSIXct(date))
+seasons_laktat_watt <- laktat_results %>% mutate(date = as.character(date)) %>% right_join(seasons_slected)  %>%
+  mutate( date = as.Date(date))
 
-laktat_watt%>% 
+laktat_results%>% 
     ggplot(aes(x=date))+
-    geom_point(aes(y=watt_2mmol, color = "2 mmol"))+
-  geom_smooth(aes(y=watt_2mmol, color = "2 mmol"))+
-  geom_point(aes(y=watt_5mmol, color = "5 mmol"))+
-  geom_smooth(aes(y=watt_5mmol, color = "5 mmol"))+
-  geom_point(data = seasons_laktat_watt, aes(y=watt_2mmol, color = "2 mmol"), size = 4)+
-  geom_point(data = seasons_laktat_watt, aes(y=watt_5mmol, color = "5 mmol"), size = 4)+
+    geom_point(aes(y=w_2mmol, color = "2 mmol"))+
+  geom_smooth(aes(y=w_2mmol, color = "2 mmol"))+
+  geom_point(aes(y=w_5mmol, color = "5 mmol"))+
+  geom_smooth(aes(y=w_5mmol, color = "5 mmol"))+
+  geom_point(data = seasons_laktat_watt, aes(y=w_2mmol, color = "2 mmol"), size = 4)+
+  geom_point(data = seasons_laktat_watt, aes(y=w_5mmol, color = "5 mmol"), size = 4)+
   geom_hline(yintercept = 200, linetype = 2)+
   geom_hline(yintercept = 260, linetype = 2)+
   theme_light()
@@ -157,13 +126,10 @@ data_gc <- prepare_gc_summary(data_gc)
 data_gc %>% arrange(desc(date))
 ```
 
-```{r}
-test = c(10,10,10,NA)
-mean(test,na.rm=TRUE)
-```
 
 
-#### Summarise the metrics for each season
+
+## Summarise the metrics for each season
 
 fehler bei date_start
 funktionen für unten schreiben
