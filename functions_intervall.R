@@ -1,6 +1,11 @@
 
 # ======================================= choose the files to process based on dates
-choose_files <- function(files, start_date, end_date){
+choose_files <- function(file_path, start_date = "2015-01-01", end_date = Sys.Date()){
+  # choose the files to process based on dates
+  #returns a tibble with file names from the file_path between start_date and end_date
+  
+  
+  files <- tibble(file_name = list.files(file_path)) %>% mutate(file_date = str_sub(file_name,1,10))
   
   date_selected <- tibble(file_date = seq.Date(as.Date(start_date),
                                                as.Date(end_date), 
@@ -10,16 +15,17 @@ choose_files <- function(files, start_date, end_date){
   files_selected_all <- files  %>% right_join(date_selected, 
                                               by= "file_date") %>% 
     filter(!is.na(file_name)) %>% #if the date doesn`t exist in the data
-    select(file_name) #%>% pull()
-  print(files_selected_all)
+    select(file_name) 
+  
+  return(files_selected_all)
   
 }
 
 
 #=============== read data and aggregate it
-read_and_agg_intervals <- function(pfad_aktivity, files, start_date, end_date){
+read_and_agg_intervals <- function(pfad_aktivity,  start_date, end_date){
   
-  files_selected <- choose_files(files, start_date, end_date)  
+  files_selected <- choose_files(pfad_aktivity, start_date, end_date)  
   
   result_list <- list()
   for (i in seq_along(files_selected$file_name)) {

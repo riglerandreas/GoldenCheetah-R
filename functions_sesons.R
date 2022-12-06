@@ -18,8 +18,8 @@ generate_season_summary <- function(lactat_data, data_gc, duration_weeks){
     date_start = lactat_calculated$date_start[i]
     date_end = lactat_calculated$date[i]
     
-    watt_2mmol <- lactat_calculated$watt_2mmol[i]
-    watt_5mmol <- lactat_calculated$watt_5mmol[i]
+    watt_2mmol <- lactat_calculated$w_2mmol[i]
+    watt_5mmol <- lactat_calculated$w_5mmol[i]
     
     dates = tibble(date = seq(ymd(date_start), ymd(date_end), by = "1 day"))
     
