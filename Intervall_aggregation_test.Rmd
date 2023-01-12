@@ -31,12 +31,15 @@ pfad_aktivity <- "C:/Users/rigle/AppData/Local/GoldenCheetah/Andl/activities/"
 
 ```
 
-Liste der json files:
-
-
 ```{r}
-choose_files(files, "2022-11-07","2022-11-11")
+
+choose_files(pfad_aktivity, "2020-04-24","2020-04-26") 
+
 ```
+
+
+
+
 
 
 
@@ -84,13 +87,10 @@ Interval_Watt sind falsch!
 
 
 
-```{r}
-file_sel <- choose_files(files, "2020-04-24","2020-04-24") 
-file_sel
-```
+
 
 ```{r}
-
+file_sel <- choose_files(pfad_aktivity, "2020-04-24", "2020-04-24")
 
 data_ride <- read_gc_data(pfad_aktivity, file_sel)
 
@@ -112,7 +112,7 @@ seq(min(ridedata$SECS),
 
 ```{r}
 
-file_sel <- choose_files(files, "2021-10-11","2021-10-11") 
+file_sel <- choose_files(pfad_aktivity, "2021-10-11","2021-10-11") 
 intervals <- read_intervals(pfad_aktivity, file_sel)
 intervals
 #add_activity_info(intervals, data_ride, file_sel)
@@ -121,25 +121,36 @@ intervals
 
 
 ```{r}
-source("functions_intervall.R")
-files_sel <- choose_files(files, "2015-01-01","2022-12-08") 
 
-result_list <- list()
-for (i in seq_along(files_sel$file_name)) {
-  
-  file_sel <- files_sel[i,]
-  result_list[[i]] <- read_intervals(pfad_aktivity, file_sel)
-  
+execute_loop = TRUE
 
+result_old <- read_csv2("Results/intervall_aggregation.csv")
+max_date <- result_old %>% summarise(max(date)) %>% pull() + 1 
 
-
+if(execute_loop == TRUE){
+    files_sel <- choose_files(pfad_aktivity, max_date,Sys.Date()) 
+    
+    result_list <- list()
+    for (i in seq_along(files_sel$file_name)) {
+      
+      file_sel <- files_sel[i,]
+      result_list[[i]] <- read_intervals(pfad_aktivity, file_sel)
+      
+    
+    
+    
+    }
+    
+    result <- bind_rows(result_list)
 }
 
-result <- bind_rows(result_list)
 
 
-#result %>% write_csv2("Results/intervall_aggregation.csv")
-result <- read_csv2("Results/intervall_aggregation.csv")
+result_new <- result_old %>% bind_rows(result) %>% arrange(desc(date))
+result_new %>% write_csv2("Results/intervall_aggregation.csv")
+
+result<- result_new
+
 ```
 
 
@@ -180,7 +191,7 @@ result_sst %>% ungroup() %>%filter(date > "2016-01-15" &
 
 ```{r}
 result_sst %>% ungroup() %>% mutate(year = lubridate::year(date)) %>%
-                    filter(year %in% c(2017,2021,2022) &
+                    filter(year %in% c(2017,2020,2021,2022) &
                                      device != "Ergometer ") %>% 
   filter(interval == TRUE) %>%
   ggplot(aes(x =date))+ 

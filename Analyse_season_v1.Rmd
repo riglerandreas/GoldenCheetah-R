@@ -52,10 +52,17 @@ data_laktat_measurements <- data_laktat_measurements %>% mutate(year =year(date)
 
 ```
 
+
+
+
 Read the list with the results for 2mmol, 4 mmol, 5mmol
 ```{r}
-laktat_results<- read_csv2(str_c(path_laktat,"laktat_watt.csv")) %>% mutate(date = as.Date(date, format = "%d.%m.%Y"))
-laktat_results 
+#old laktat results only with lakattests:
+#laktat_results<- read_csv2(str_c(path_laktat,"laktat_watt.csv")) %>% mutate(date = as.Date(date, format = "%d.%m.%Y"))
+
+#new list also including ftp tests (20min, 60min)
+laktat_results<- read_csv2(str_c(path_laktat,"laktat_watt_ftp.csv")) %>% mutate(date = as.Date(date, format = "%d.%m.%Y"))
+
 ```
 
 
@@ -65,10 +72,25 @@ laktat_results
 ```{r}
 
 
-plot_laktat_curves(data_laktat_measurements,laktat_results)
+plot_laktat_curves(data_laktat_measurements ,laktat_results %>% filter(test_type == "Laktat"))
+```
+
+```{r}
+
+
+ftp_calculation(data_laktat_measurements, date_selected = "2023-01-07")
 ```
 
 
+```{r}
+data_plot <- data_laktat_measurements %>% mutate(year = as.factor(lubridate::year(date)))
+data_plot_23 <- data_plot %>% filter(year == "2023")
+
+data_plot %>% ggplot()+
+  geom_line(aes(x=watt, y = laktat, group = date, color = year))+
+  geom_line(data=data_plot_23,aes(x=watt, y = laktat, group = date, color = year), size = 1)
+  
+```
 
 
 
@@ -141,26 +163,44 @@ source("functions_sesons.R")
 weeks_per_season = 12
 
 data_season <- generate_season_summary(lactat_data = seasons_laktat_watt, data_gc = data_gc, weeks_per_season)
-data_season_all <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, weeks_per_season)
 
 data_season %>% arrange(date_test) %>% select(year, date_test, everything())
 ```
 
 ```{r}
 
-data_season_all <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, weeks_per_season)
+data_season_all <- generate_season_summary(lactat_data = laktat_results, data_gc = data_gc, weeks_per_season)
 
-data_season %>% arrange(date_test) %>% select(year, date_test, everything())
+data_season_all %>% arrange(date_test) %>% select(year, date_test, everything())
 ```
 
 
 
 ```{r}
-data_season %>%
-  pivot_longer(cols = c(watt_2mmol, TSS, duration)) %>%
+data_season_all %>%
+  pivot_longer(cols = c(watt_5mmol, TSS, duration)) %>%
   ggplot(aes(x=date_test))+
   geom_line(aes(y= value))+
   geom_point(aes(y= value))+
+  facet_wrap(name ~., ncol = 1, scales = "free_y")+
+  labs(title = str_c(weeks_per_season, " weeks per season"))+
+  theme_light()
+```
+
+```{r}
+
+TSS_today <- data_season_all %>% filter(date_test ==Sys.Date()) %>% select(TSS) %>% pull()
+duration_today <- data_season_all %>% filter(date_test ==Sys.Date()) %>% select(duration) %>% pull()
+
+data_season_all %>% 
+  pivot_longer(cols = c(watt_5mmol, TSS, duration)) %>%
+  mutate(categorie = case_when((name == "TSS" & value > TSS_today) |
+                                (name == "duration" & value > duration_today) ~ "higher",
+                                TRUE ~ "lower")) %>%
+
+  ggplot(aes(x=date_test))+
+  geom_line(aes(y= value))+
+  geom_point(aes(y= value, color = categorie))+
   facet_wrap(name ~., ncol = 1, scales = "free_y")+
   labs(title = str_c(weeks_per_season, " weeks per season"))+
   theme_light()
@@ -170,7 +210,126 @@ data_season %>%
 
 
 ```{r}
+data_today <- data_season_all %>% filter(date_test == Sys.Date())
+data_season_all %>%  filter(!is.na(watt_2mmol)) %>%
+  ggplot(aes(x=duration))+
+  geom_point(aes(y = watt_2mmol, color = year))+
+  geom_smooth(aes(y=watt_2mmol))+
+  geom_vline(xintercept = data_today$duration, linetype = 2)+
+  labs(title = str_c("2mmol Watt vs Duration for ",weeks_per_season, " weeks per season"))+
+  theme_light()
+```
+
+```{r}
+date_sel <- "2023-01-07"
+data_sel <- data_season_all %>% filter(!is.na(watt_2mmol) &
+                                         date_test == date_sel)
+
+data_season_all %>% filter(!is.na(watt_2mmol)) %>% #filter(date_test == as.Date("2023-01-07"))
+  ggplot(aes(x=TSS))+
+  geom_point(aes(y = watt_2mmol, color = year))+
+  geom_point(data = data_sel, aes(y = watt_2mmol, color = year),size = 5)+
+  geom_smooth(aes(y=watt_2mmol))+
+  geom_vline(xintercept = data_today$TSS, linetype = 2)+
+  labs(title = str_c("2mmol Watt vs TSS for ",weeks_per_season, " weeks per season"))+
+  theme_light()
+```
+
+```{r}
+date_sel <- "2023-01-07"
+data_sel <- data_season_all %>% filter(!is.na(watt_5mmol) &
+                                         date_test == date_sel)
+
+data_season_all %>% filter(!is.na(watt_5mmol)) %>% #filter(date_test == as.Date("2023-01-07"))
+  ggplot(aes(x=TSS))+
+  geom_point(aes(y = watt_5mmol, color = year))+
+  geom_point(data = data_sel, aes(y = watt_5mmol, color = year),size = 5)+
+  geom_smooth(aes(y=watt_5mmol))+
+  geom_vline(xintercept = data_today$TSS, linetype = 2)+
+  labs(title = str_c("5 mmol Watt vs TSS for ",weeks_per_season, " weeks per season"))+
+  theme_light()
+```
+
+#### Einschub lineare Regression
+
+```{r}
+library(tidymodels)
+```
+
+```{r}
+data_split <- initial_split(data_season_all, prop = 0.75) #, strata = "year"
+ 
+w2mm_train <- training(data_split)
+w2mm_test  <- testing(data_split)
+```
+
+```{r}
+lm_spec <- linear_reg()
+lm_fit_2mmol <- fit(lm_spec, watt_2mmol ~ duration + TSS, data = w2mm_train)
+lm_fit_5mmol <- fit(lm_spec, watt_5mmol ~  duration + TSS + TSS*TSS, data = w2mm_train)
+lm_fit_2mmol
+```
+
+```{r}
+predict(lm_fit_2mmol, new_data = w2mm_test) %>% bind_cols(w2mm_test) %>% select(watt_2mmol, .pred,everything())
+```
+
+```{r}
+today_2mmol <- predict(lm_fit_2mmol, new_data = data_today) %>% pull()
+today_2mmol
+```
+
+```{r}
+today_5mmol <- predict(lm_fit_5mmol, new_data = data_today) %>% pull()
+today_5mmol
+```
+
+```{r}
+data_season_all %>%
+  ggplot(aes(x=TSS))+
+  geom_point(aes(y = watt_2mmol, color = year))+
+  geom_smooth(aes(y=watt_2mmol))+
+  geom_hline(yintercept = c(today_2mmol), linetype = 2)+
+  geom_vline(xintercept = data_today$TSS, linetype = 2)+
+  labs(title = str_c("2mmol Watt vs TSS for ",weeks_per_season, " weeks per season"),
+       subtitle = str_c("2 mmol today at ", round(today_2mmol), "W"))+
+  theme_light()
+```
+
+
+```{r}
+data_season_all %>%
+  ggplot(aes(x=TSS))+
+  geom_point(aes(y = watt_5mmol, color = year))+
+  geom_smooth(aes(y=watt_5mmol))+
+  geom_hline(yintercept = c(today_5mmol), linetype = 2)+
+  geom_vline(xintercept = data_today$TSS, linetype = 2)+
+  geom_abline(slope = lm_fit_5mmol$fit$coefficients[2], 
+              intercept = lm_fit_5mmol$fit$coefficients[1],
+              color = "blue", linetype = 2)+
+  labs(title = str_c("5mmol Watt vs TSS for ",weeks_per_season, " weeks per season"),
+       subtitle = str_c("5 mmol today at ", round(today_5mmol), "W"))+
+  theme_light()
+```
+
+
+
+#### Einschub ende
+
+
+```{r}
+data_season_all %>% #filter(watt_5mmol > 262)
+  ggplot(aes(x=TSS))+
+  geom_point(aes(y = watt_5mmol, color = year))+
+  geom_smooth(aes(y=watt_5mmol))+
+  geom_vline(xintercept = data_today$TSS, linetype = 2)+
+  labs(title = str_c("5mmol Watt vs TSS for ",weeks_per_season, " weeks per season"))+
+  theme_light()
+```
+
+```{r}
 weeks = c(1:20)
+#weeks = c(1,10,20,30,40,50,100)
 
 weeks_correlation_list_2 <- list()
 weeks_correlation_list_5 <- list()
@@ -187,7 +346,7 @@ col_selected_5 <- c(col_5mmol, col_variables)
 for (i in seq_along(weeks)) {
   
   data_season <- generate_season_summary(lactat_data = seasons_laktat_watt, data_gc = data_gc, weeks[i])
-  data_season_all <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, weeks[i])
+  data_season_all <- generate_season_summary(lactat_data = laktat_results, data_gc = data_gc, weeks[i])
   
   weeks_correlation_list_2[[i]] = correlation_2mmol(data_season, col_selected_2) %>% mutate(weeks = !!weeks[i])
   weeks_correlation_all_list_2[[i]] = correlation_2mmol(data_season_all, col_selected_2) %>% mutate(weeks = !!weeks[i])
@@ -225,14 +384,14 @@ plot_corr <- function(df){
   
 }
 
-plot_corr(corr_2mmol ) +
-  labs(title = "selected seasons: correleation between 2 mmol watt considering weeks / season")
+plot_corr(corr_2mmol_all ) +
+  labs(title = "correleation between 2 mmol watt considering weeks / season")
 
 ```
 
 ```{r}
-plot_corr(corr_5mmol) +
-  labs(title = "selected seasons: correleation between 5 mmol watt considering weeks / season")
+plot_corr(corr_5mmol_all) +
+  labs(title = "correleation between 5 mmol watt considering weeks / season")
 ```
 
 warum watt so hohe korrelation über so langen zeitraum? 
@@ -272,9 +431,9 @@ was ist correlation eigentlich?
 2021-01-28 219W 2mmol wirkt wie fehlmessung, besser nicht berücksichtigen
 
 ```{r}
-plot_data_12 <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, 12)
-plot_data_4 <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, 4) 
-plot_data_6 <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, 4) 
+plot_data_12 <- generate_season_summary(lactat_data = laktat_results, data_gc = data_gc, 12)
+plot_data_4 <- generate_season_summary(lactat_data = laktat_results, data_gc = data_gc, 4) 
+plot_data_6 <- generate_season_summary(lactat_data = laktat_results, data_gc = data_gc, 4) 
 
 plot_data_12%>%
   ggplot(aes(x=TSS))+
@@ -447,7 +606,7 @@ auf der anderen seite beim vergleich mit 12 wochen:
 
 
 ```{r}
-plot_data_year <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, 52)
+#plot_data_year <- generate_season_summary(lactat_data = laktat_watt, data_gc = data_gc, 52)
 ```
 
 ```{r}
@@ -507,6 +666,105 @@ watt_device <- function(df, device_list = c("BAsso_Vector", "P2M", "P2Cros", "P2
   return(df)
 }
 ```
+
+### Einschub mit FTP verbinden
+und damit Interval identifizieren
+
+```{r}
+ftp_values <- add_missing_dates(laktat_results,colname="w_5mmol")
+
+ftp_values%>%
+  ggplot(aes(x=date, y = w_5mmol))+
+  geom_line()
+```
+
+```{r}
+sel_years <-c(2017,2021,2022)
+
+intensity_min <- 0.88 
+
+235*intensity_min
+
+plot_interval_data <- watt_device(data_intervals ) %>% filter(watt_device == TRUE)%>% 
+                    mutate(year = lubridate::year(date),
+                           watt_secs = watt*secs) %>%
+                    #filter(year %in% sel_years) %>% 
+        left_join(ftp_values, by = "date") %>%
+  mutate(intensity = watt / w_5mmol) %>%
+  filter(intensity > intensity_min) 
+
+plot_interval_data %>%
+  #summarise(max(date))
+  ggplot(aes(x=date))+
+  geom_point(aes(y=watt, color = intensity))
+  
+  
+
+```
+
+```{r}
+sel_years <-c(2017,2021,2022,2023)
+
+plot_interval_data %>% mutate(day_of_year = lubridate::yday(date))%>%
+  group_by(year,day_of_year)%>%
+  summarise(watt = mean(watt),
+            min = sum(min)) %>%
+  filter(min > 5) %>%
+  filter(year %in% sel_years) %>% 
+  ggplot(aes(x=day_of_year))+
+  geom_point(aes(y=watt, color = as.factor(year), size = min), alpha = 1/2)+
+  coord_cartesian(ylim =c(180,320), xlim =c(1,150))+
+  theme_light()
+```
+
+```{r}
+
+sel_years <-c(2017,2021,2022,2023)
+
+plot_interval_data %>% mutate(day_of_year = lubridate::yday(date)) %>%
+          filter(day_of_year %in% c(1:100)) %>%
+  group_by(year,day_of_year)%>%
+  summarise(watt = mean(watt),
+            min = sum(min)) %>%
+  filter(min > 5) %>% 
+  filter(year %in% sel_years) %>% 
+      group_by(year) %>% arrange(day_of_year) %>%
+        mutate(min_cum = cumsum(min),
+               hours_cum = min_cum /60) %>%
+  
+  ggplot(aes(x=day_of_year))+
+  geom_line(aes(y=hours_cum, color = as.factor(year)), alpha = 1)+
+  geom_point(aes(y=hours_cum, color = as.factor(year)))+
+  geom_point(aes(x=50, y= 10, color = "Ziel"), size = 3)+
+  coord_cartesian( xlim =c(1,100))+
+  labs(title = str_c("cummulated time in intervalls > ", intensity_min, " intensity"),
+       x = "day of the year",
+       y = "hours",
+       color = "year")+
+  theme_light()
+
+lubridate::yday("2023-02-20")
+```
+
+```{r}
+intensity_min = 0.88
+watt_device(data_intervals ) %>% filter(watt_device == TRUE)%>% 
+                    mutate(year = lubridate::year(date),
+                           watt_secs = watt*secs) %>%
+                    #filter(year %in% sel_years) %>% 
+        left_join(ftp_values, by = "date") %>%
+  mutate(intensity = watt / w_5mmol) %>%
+  filter(intensity > intensity_min)  %>%
+  
+ mutate(day_of_year = lubridate::yday(date)) %>%
+          filter(day_of_year %in% c(1:30) &
+                year == 2021) %>% arrange(day_of_year) %>%
+  select(date, workout_code, intensity, min, watt, w_5mmol,everything()) 
+```
+
+
+### Einschub Ende
+
 
 
 ```{r}

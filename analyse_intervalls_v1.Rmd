@@ -55,7 +55,7 @@ calculated with Lactate_Curve_FTP.rmd
 ```{r}
 laktat_watt_raw <- read_csv2(str_c(path_laktat_ftp,"laktat_watt.csv"))
 
-laktat_watt <- laktat_watt_raw %>% mutate(date = as.Date(datum, "%d.%m.%Y")) %>% select(-datum) %>% 
+laktat_watt <- laktat_watt_raw %>% mutate(date = as.Date(date, "%d.%m.%Y")) %>% 
                       arrange(date)%>% 
               mutate(date_max = lead(date) - 1,
                     date_min = date,

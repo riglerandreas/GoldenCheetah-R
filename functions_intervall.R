@@ -24,6 +24,7 @@ choose_files <- function(file_path, start_date = "2015-01-01", end_date = Sys.Da
 
 #=============== read data and aggregate it
 read_and_agg_intervals <- function(pfad_aktivity,  start_date, end_date){
+  library("jsonlite")
   
   files_selected <- choose_files(pfad_aktivity, start_date, end_date)  
   

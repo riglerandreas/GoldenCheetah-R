@@ -19,8 +19,12 @@ add_missing_dates <- function(df, colname){
 
 
 ftp_calculation <- function(data_raw, date_selected){
+  # calculates the 2mmol watt value and the 5mmol watt value based on the lactat test
+  #date_selected ... which lactat test
+  # returns a list with the data and the 2mmol and 5mmol values
+  
   date_selected <- as.Date(date_selected)
-  data_raw <- data_raw %>% filter(datum == date_selected) #year == jahr & month == monat)
+  data_raw <- data_raw %>% filter(date == date_selected) 
   
   #fehlmessungen filter: (laktat muss steigen)
   data_raw <- data_raw %>% mutate(rising_laktat = laktat-lag(laktat, 
@@ -51,7 +55,7 @@ ftp_calculation <- function(data_raw, date_selected){
   laktat_result <- data_measured %>% mutate(gemessen = TRUE) %>%
     select(laktat,watt,gemessen) %>%
     bind_rows(laktat_prediction) %>%
-    mutate(datum = date_selected)
+    mutate(date = date_selected)
   
   result <-  list(data = laktat_result,#laktat_prediction,
                   w_5m = w_5m,
@@ -82,7 +86,7 @@ watt_2mmol <- function(d, start_b = 0.1){
   
   laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
     add_predictions(model_laktat,"watt") 
-  date <- d %>% summarise(mean(datum)) %>% pull()
+  date <- d %>% summarise(mean(date)) %>% pull()
   watt <- laktat_prediction %>% filter(laktat <= 2) %>% summarise(watt = max(watt)) %>% pull()
   
   result <- tibble("date" = date,
@@ -107,7 +111,7 @@ watt_xmmol <- function(d,x){
   
   laktat_prediction <- d %>% data_grid(laktat = seq_range(laktat,200)) %>%
     add_predictions(model_laktat,"watt") 
-  date <- d %>% summarise(mean(datum)) %>% pull()
+  date <- d %>% summarise(mean(date)) %>% pull()
   watt <- laktat_prediction %>% filter(laktat <= x) %>% summarise(watt = max(watt)) %>% pull()
   
   result <- watt
