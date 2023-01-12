@@ -1,0 +1,88 @@
+---
+title: "Activity_map"
+author: "ari"
+date: '2022-12-16'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+KArte mit Aktivitäten (anzhal, jahr,...)
+
+date aggregieren
+plotten
+
+```{r}
+library(tidyverse)
+
+source("functions_intervall.R")
+```
+
+```{r}
+pfad_aktivity <- "C:/Users/rigle/AppData/Local/GoldenCheetah/Andl/activities/" 
+```
+
+
+```{r}
+files <- choose_files(pfad_aktivity ,start_date = "2022-12-10")
+files
+```
+
+```{r}
+add_activity_info_new <- function(df, data_ride){
+  
+  if (sum(names(data_ride$RIDE$TAGS) =="Workout Code") == 0) { 
+        workout_code <- ""}else{
+        workout_code <- as.character(data_ride$RIDE$TAGS$`Workout Code`)}
+  
+  if (sum(names(data_ride$RIDE$TAGS) =="Rad") == 0) { 
+      device_name <- ""}else{
+        device_name <- as.character(data_ride$RIDE$TAGS$Rad)}
+  
+  
+  #add the main acitvity infos to the intervals
+  df <- df %>% mutate(
+                      workout_code = !!workout_code,
+                      device = !!device_name,
+                      start_time = data_ride$RIDE$STARTTIME,
+                      date  = as.Date(start_time))
+  
+  return(df)
+}
+
+
+
+
+read_activitys <- function(pfad_aktivity,  start_date, end_date){
+  library("jsonlite")
+  
+  files_selected <- choose_files(pfad_aktivity, start_date, end_date)  
+  
+  result_list <- list()
+  for (i in seq_along(files_selected$file_name)) {
+    
+    file_name <- files_selected$file_name[i]
+    datei <- str_c(pfad_aktivity,file_name)
+    data_ride <- read_json(datei)
+    ridedata_list <- data_ride[[1]]$SAMPLES
+    ridedata <- bind_rows(ridedata_list)
+    
+    result_activity <- ridedata %>% summarise(LAT = mean(LAT),
+                                               LON = mean(LON))
+    
+    result_activity <- add_activity_info_new(result_activity, data_ride)
+    
+    result_list[[i]] <- result_activity                
+  }
+  
+  result <- bind_rows(result_list)
+  
+  return(result)
+  
+}
+
+read_activitys(pfad_aktivity ,start_date = "2022-12-09", end_date = "2022-12-12") 
+```
+
