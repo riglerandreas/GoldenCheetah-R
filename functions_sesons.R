@@ -1,8 +1,9 @@
-generate_season_summary <- function(lactat_data, data_gc, duration_weeks){
-  # aggregates the aktivity data per season
+generate_season_summary <- function(lactat_data, data_gc, data_intervals_all, duration_weeks){
+  # aggregates the activity data per season
   #
   # lactat_data ... tibble with date and watt_2mmol, watt_5mmol values for each season
   # data_gc ... activity data from gc 
+  # data_intervals_all ... the intercal data
   # duration_weeks ... how many weeks are considered per season?
   #
   # the date of today is also included as a season
@@ -26,8 +27,18 @@ generate_season_summary <- function(lactat_data, data_gc, duration_weeks){
     #---------- create dates of season for filtering
     dates = tibble(date = seq(ymd(date_start), ymd(date_end), by = "1 day"))
     
-    activities_data <- dates %>% left_join(data_gc, by = "date")  
-    activities_data <- activities_data %>% filter(duration >0)
+    date_char <- function(df){
+      #joining with characters is safer
+      df %>% mutate(date = as.character(date))
+    }
+    
+    activities_data <- date_char(dates) %>% left_join(date_char(data_gc), by = "date") %>%
+      filter(duration > 0) %>%
+      mutate(date = as.Date(date))
+    
+    data_intervals <-  date_char(dates) %>% 
+      left_join(date_char(data_intervals_all), by = "date") %>% filter(!is.na(watt)) %>% 
+      mutate(date = as.Date(date))
     
     #---------------  aggregation -------------
     aggregation_1 <- activities_data %>% 
@@ -46,13 +57,19 @@ generate_season_summary <- function(lactat_data, data_gc, duration_weeks){
     aggregation_watt <- activities_data %>% filter(w_mean>0) %>%
       summarise(n_bike = n(),
                 watt = mean(w_mean, na.rm = TRUE))
+    aggregation_intervals <- data_intervals %>% #filter(intensity > intensity_min) %>%
+      summarise(n_interval = n(),
+                interval_watt = mean(watt, na.rm = TRUE),
+                interval_hr = mean(hr, na.rm = TRUE),
+                interval_min = sum(min, na.rm = TRUE))
     
-    activites_aggregated_list[[i]]  <- aggregation_1 %>% bind_cols(aggregation_watt)
+    activites_aggregated_list[[i]]  <- aggregation_1 %>% bind_cols(aggregation_watt) %>% bind_cols(aggregation_intervals)
   }
   
   result= bind_rows(activites_aggregated_list) %>% 
     distinct(date_test, .keep_all = TRUE) %>%
     mutate(year = lubridate::year(date_test) %>% as.factor())
+  
   return(result)
 }
 
