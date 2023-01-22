@@ -45,7 +45,7 @@ read_and_agg_intervals <- function(pfad_aktivity,  start_date, end_date){
 }
 
 
-read_intervals <- function(pfad_aktivity, file_name){
+read_intervals <- function(pfad_aktivity, file_sel){
                     # read the intervalls and aggregate them
   
   data_ride <- read_gc_data(pfad_aktivity, file_sel)

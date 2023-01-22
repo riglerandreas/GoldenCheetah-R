@@ -59,6 +59,168 @@ ftp_values%>%
   ggplot(aes(x=date, y = w_5mmol))+
   geom_line()
 ```
+### Calculate difference and progress
+
+wie genau?
+ - vom letzten ftp test an (auch wenn der 4 wochen vorher war)
+ - Wert von 12 Wochen davor (der aktuelle Test, oder Wert des Verlaufes?)
+ - verschiedene werte für verschiedene wochen
+ - Verlauf und kein Progress- Progress berechnet sich dann aus den seasons (min und max)  --> probieren!
+
+
+```{r}
+#=========================== Laktat Curve =============================================
+
+add_missing_dates_2 <- function(df, colname){
+  library(zoo)
+  
+  df <- df %>% ungroup() %>% arrange(date) %>% mutate(FTP_progress = w_5mmol - lag(w_5mmol)) 
+  
+  df <- df %>% mutate(FTP_progress_2 = lag(FTP_progress))
+  
+  #creates a tibble with all dates between the first test and today
+  #with the last known value of the colname for each day
+  
+  dates <- tibble(date = seq(min(df$date), Sys.Date(), by = "day"))
+  
+  result <- dates  %>% left_join(df, by = "date") %>% select(date, colname,FTP_progress) %>% #zoo::na.locf()
+                            
+  mutate(FTP_progress2 = na.locf0(FTP_progress, fromLast = TRUE))%>%na.locf()
+  
+  return(result)
+}
+
+test <- add_missing_dates_2(laktat_results,colname="w_5mmol") 
+
+test %>% filter(date > "2016-01-01" &
+                date < "2018-01-01") %>%
+  ggplot()+
+  geom_point(aes(x=date, y = FTP_progress2))+
+  geom_point( aes(x=date, y = w_5mmol-230, color = "test all"))#+
+  #geom_point(data = laktat_results%>% filter(date > "2016-01-01"), aes(x=date, y = w_5mmol-230, color = "test"))
+  
+```
+
+
+
+```{r}
+
+
+laktat_test_data <- tibble(date = as.Date(c("2023-01-07","2023-01-10", "2023-01-13")),
+                           FTP = c(210,200,230))
+
+test_function <- function(df){
+  library(lubridate)
+  library(zoo)
+  
+  df <- df %>% mutate(FTP_prev = lag(FTP),
+                      Test = TRUE,
+                      FTP_diff = FTP - FTP_prev,
+                      days = as.integer(date - lag(date)),
+                      FTP_per_day = FTP_diff/(days))
+  
+  dates <- tibble(date = seq(min(df$date), Sys.Date(), by = "day"),
+                  day = yday(date))
+  
+  result <- dates  %>% left_join(df, by = "date") %>% 
+                    mutate(date_test = case_when((date == Sys.Date()) |
+                                                  (Test == TRUE) ~  date))
+  
+  result <- result %>% mutate(date_test = na.locf0(date_test, fromLast = TRUE),
+                              FTP  = na.locf0(FTP, fromLast = TRUE),
+                              FTP_prev  = na.locf0(FTP_prev, fromLast = TRUE),
+                              FTP_per_day = na.locf0(FTP_per_day, fromLast = TRUE),
+                              FTP_per_day = na.locf0(FTP_per_day, fromLast = TRUE))
+  
+   result <- result %>% group_by(date_test) %>% arrange(date) %>%
+                            mutate(FTP_add = cumsum(FTP_per_day),
+                                   FTP2 = case_when(Test == TRUE ~ FTP,
+                                                   TRUE ~ FTP_prev+FTP_add)) %>%
+     select(date,day, FTP, FTP2, FTP_per_day, everything())
+  
+  return(result)
+}
+
+test_function(laktat_results %>% mutate(FTP = w_5mmol)) %>% #filter(date > "2017-11-29") %>% arrange(date) %>% select(date,day, FTP, FTP2)
+  ggplot(aes(x = date))+
+  geom_line(aes(y= FTP, color = "only values"))+
+  geom_line(aes(y=FTP2, color = "interpolating"))+
+  geom_smooth(aes(y=FTP))
+```
+
+
+exponential unten:
+parameter passen noch nicht - gibts doch log rechenregeln um hochzahlen zu entschärfen?
+```{r}
+test <- tibble(x = seq(1,10,0.1))
+
+final <- 4
+
+quot <- 7
+
+max(test$x) - log(final)/log(quot)
+
+max(test$x) - final^(1/quot)
+
+test %>% mutate(y_2 = 2^(x-8),
+                y_3 = 7^(x-9.287586),
+                #y_1_5 = 1.5^(x-9.287586),
+                y_e = exp(1/x)) %>%
+  ggplot()+
+  geom_point(aes(y = y_2, x=x, color = "2"))+
+  geom_point(aes(y = y_3, x=x, color = "3"))
+  #geom_point(aes(y = y_1_5, x=x, color = "1.5"))
+  #geom_point(aes(x = x, y=y_e, color = "exp"))
+```
+
+
+```{r}
+exp_trend <-function(df,final_value, quote){
+  coef = max(df$x) - log(final_value)/log(quote)
+  coef_neg = log(final_value)/log(quote) + min(df$x)
+  
+  df <- df %>% mutate(y = final_value -quote^(coef_neg - x),
+                      y_2 = quote^(coef_neg - x))
+  
+  return(df)
+}
+
+exp_trend(test, final_value = 6, quote = 1.7)%>%
+  ggplot()+
+  geom_point(aes(y = y, x=x))+
+  geom_point(aes(y = y_2, x=x, color = "neg"))
+```
+
+
+```{r}
+quotes_list <- c(1.3,1.5, 1.7)
+
+
+results <- list()
+
+for (i in seq_along(quotes_list)) {
+  results[[i]] <- exp_trend(test, final_value = 6, quote = quotes_list[i]) %>%
+    mutate(quote =  as.factor(quotes_list[i])) 
+  
+}
+
+bind_rows(results)%>%
+  ggplot()+
+  geom_point(aes(y = y, x=x, color = quote))+
+  geom_point(aes(y = y_2, x=x, color = quote))
+```
+
+```{r}
+exp_trend <-function(df,final_value, quote){
+  coef = max(df$x) - log(final_value)/log(quote)
+  coef_neg = log(final_value)/log(quote) + min(df$x)
+  
+  df <- df %>% mutate(y = final_value -quote^(coef_neg - x),
+                      y_2 = quote^(coef_neg - x))
+  
+  return(df)
+}
+```
 
 
 ### Calculate the FTP from the Lactat
@@ -124,11 +286,20 @@ data_intervals_raw <- update_intervals(path_activities_raw, path_intervalls)
 
 data_intervals <- extract_intervals(data_intervals_raw, device_list, ftp_values)
 
+ftp_values %>% arrange(desc(date))
 
-
-data_intervals %>% group_by(date) %>% summarise(min = sum(min)) %>%
-  ggplot(aes(x=date, y = min)) + 
+data_intervals %>% mutate(year = lubridate::year(date),
+                          year = as.factor(year)) %>% 
+                      group_by(year) %>% arrange(date) %>% mutate(min = cumsum(min),
+                                                                  day = lubridate::yday(date)) %>%
+  filter(day < 50 & year %in% c(2017,2018,2021, 2022,2023)) %>%
+  ggplot(aes(x=day, y = min/60,color = year)) + 
+  geom_line() +
   geom_point() +
+  geom_point(aes(x=50,y = 10, color = "2023"), size = 3)+
+  geom_abline(slope = 0.2, linetype = 3)+
+  labs(y = "hours",
+       title = "intervall time")+
   theme_light()
 ```
 
@@ -159,13 +330,22 @@ data_season  %>% select(date_test, watt_5mmol, n_interval:interval_min) %>%
 ```
 
 ```{r}
-data_season  %>% #select(date_test, watt_5mmol, n_interval:interval_min) %>% 
-  ggplot(aes(x=interval_min)) + geom_point(aes(y= watt_5mmol, color = year))+
+data_season  %>% 
+  ggplot(aes(x=interval_min)) + 
+  geom_point(aes(y= watt_5mmol, color = year))+
+  geom_line(aes(y= watt_5mmol, group = year,color = year))+
+  geom_smooth(aes(y=watt_5mmol))+
+  geom_vline(data = data_season_today,aes(xintercept = data_season_today$interval_min[5]), linetype = 2)+
+  scale_x_log10()+
     labs(y = "W 5mmol",
        x = "interval [min]",
        color = "",
        title = str_c(weeks_per_season, " weeks per season"))+
   theme_light()
+```
+
+```{r}
+exp(data_season$interval_min)
 ```
 
 
@@ -191,8 +371,10 @@ data_seasons <-  bind_rows(data_seasons_list)
 data_season_today <- data_seasons %>% filter(date_test == max(date_test))
 
 data_seasons %>% #select(date_test, watt_5mmol, n_interval:interval_min) %>% 
-  ggplot(aes(x=interval_min)) + geom_point(aes(y= watt_5mmol, color = as.factor(weeks)))+
+  ggplot(aes(x=interval_min)) + 
+  geom_point(aes(y= watt_5mmol, color = as.factor(year)))+
   geom_vline(data = data_season_today,aes(xintercept = data_season_today$interval_min), linetype = 2)+
+  scale_x_log10()+
   facet_wrap(weeks~., scales = "free_x")+
   theme_light()
 

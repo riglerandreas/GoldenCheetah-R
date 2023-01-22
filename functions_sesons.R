@@ -82,7 +82,9 @@ extract_intervals <- function(df_intervals, device_list, ftp_values,intensity_mi
   # uses only data specified in the device_list
   # intensity = watt_interval / watt_ftp
   
-  df_intervals <- df_intervals %>% filter(device %in% device_list) %>% 
+  df_intervals <- df_intervals %>% 
+          mutate(device = str_remove_all(device, " ")) %>%
+          filter(device %in% device_list) %>% 
     left_join(ftp_values, by = "date") %>%
     mutate(intensity = watt / w_5mmol) %>% 
     
