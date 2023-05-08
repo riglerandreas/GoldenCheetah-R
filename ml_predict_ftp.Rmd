@@ -1,0 +1,269 @@
+---
+title: "ml_predict_ftp"
+author: "ari"
+date: '2023-03-26'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+```
+
+## Model 1, only duration:
+
+```{r}
+#from pipeline_features.Rmd:
+data_seasons_wider_all <-  read_csv2("Results/ml/ml_1/duration_ftp_seasons_wider.csv") 
+
+data_seasons_wider <- data_seasons_wider_all %>% filter(!is.na(FTP))
+data_seasons_wider
+```
+
+### 0 Model:
+```{r}
+result_0_model <- data_seasons_wider %>% mutate(mean_FTP = mean(FTP,na.rm = TRUE),
+                                 median_FTP = median(FTP,na.rm = TRUE)) %>%
+  select(date_test, FTP, mean_FTP,median_FTP, everything()) 
+
+result_0_model
+```
+
+```{r}
+
+print(str_c("RMSE mean value: ",sqrt(mean((result_0_model$FTP - result_0_model$mean_FTP)^2)),
+            " , RMSE medain value: ",sqrt(mean((result_0_model$FTP - result_0_model$median_FTP)^2))
+            ))
+
+```
+
+### Train Test data
+
+```{r}
+set.seed(4595)
+data_split <- initial_split(data_seasons_wider,  prop = 0.75)
+
+data_train <- training(data_split)
+data_test  <- testing(data_split)
+```
+
+### Model
+```{r}
+lm_model <- linear_reg() %>% set_engine("lm")
+```
+
+#### only week 4, 12, 22:
+
+```{r}
+simple_weeks <- 
+  recipe(FTP ~ week_4_dur + week_12_dur + week_22_dur,
+         data = data_train) 
+```
+
+```{r}
+lm_wflow <- 
+  workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(simple_weeks)
+ 
+lm_fit <- fit(lm_wflow, data_train)
+```
+
+RMSE only test data:
+```{r}
+data_test_pred <- data_test %>% bind_cols(predict(lm_fit,data_test)) %>% 
+                                  rename(FTP_pred = .pred) %>% select(date_test, FTP, FTP_pred, everything())
+
+sqrt(mean((data_test_pred$FTP - data_test_pred$FTP_pred)^2))
+```
+
+RMSE all data:
+```{r}
+data_test_pred <- data_seasons_wider %>% bind_cols(predict(lm_fit,data_seasons_wider)) %>% 
+                                  rename(FTP_pred = .pred) %>% select(date_test, FTP, FTP_pred, everything())
+
+sqrt(mean((data_test_pred$FTP - data_test_pred$FTP_pred)^2))
+```
+
+
+
+#### All Weeks
+
+```{r}
+
+all_weeks <- 
+  recipe(FTP ~ week_4_dur + week_6_dur + week_8_dur + week_10_dur+ week_12_dur + week_16_dur + week_18_dur+ week_20_dur,
+         data = data_train) 
+```
+
+
+```{r}
+lm_wflow <- 
+  workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(all_weeks)
+ 
+lm_fit_all <- fit(lm_wflow, data_train)
+```
+
+RMSE only test data:
+```{r}
+data_test_pred_all_Weeks <- data_test %>% bind_cols(predict(lm_fit_all,data_test)) %>% 
+                                  rename(FTP_pred = .pred) %>% select(date_test, FTP, FTP_pred, everything())
+
+sqrt(mean((data_test_pred_all_Weeks$FTP - data_test_pred_all_Weeks$FTP_pred)^2))
+```
+
+RMSE only train data:
+```{r}
+data_test_pred_all_Weeks <- data_train %>% bind_cols(predict(lm_fit_all,data_train)) %>% 
+                                  rename(FTP_pred = .pred) %>% select(date_test, FTP, FTP_pred, everything())
+
+sqrt(mean((data_test_pred_all_Weeks$FTP - data_test_pred_all_Weeks$FTP_pred)^2))
+```
+
+RMSE all data:
+```{r}
+data_test_pred_all_Weeks <- data_seasons_wider %>% bind_cols(predict(lm_fit_all,data_seasons_wider)) %>% 
+                                  rename(FTP_pred = .pred) %>% select(date_test, FTP, FTP_pred, everything())
+
+sqrt(mean((data_test_pred_all_Weeks$FTP - data_test_pred_all_Weeks$FTP_pred)^2))
+```
+
+
+```{r}
+data_test_pred_all_Weeks %>%
+  ggplot(aes(x = date_test))+
+  geom_point(aes(y= FTP, color = "FTP"))+
+  geom_point(aes(y= FTP_pred, color = "FTP predicted"))+
+  theme_light()
+```
+
+```{r}
+data_test_pred_all_Weeks %>%
+  ggplot(aes(x = week_12_dur))+
+  geom_point(aes(y= FTP, color = "FTP"))+
+  geom_point(aes(y= FTP_pred, color = "FTP predicted"))
+```
+
+```{r}
+data_test_pred_all_Weeks %>% mutate(pred_error = FTP - FTP_pred) %>%
+  ggplot(aes(x = date_test))+
+  geom_point(aes(y= pred_error, color = "FTP - FTP_pred"))+
+  theme_light()
+```
+## Model with interval_min
+
+```{r}
+#from pipeline_features.Rmd:
+data_seasons_wider_min_all <-  read_csv2("Results/ml/ml_1/duration_ftp_seasons_min_wider.csv") 
+
+data_seasons_min_wider <- data_seasons_wider_min_all %>% filter(!is.na(FTP))
+data_seasons_min_wider
+```
+
+
+### Train Test data
+
+```{r}
+
+train_linear_reg <- function(df){
+    set.seed(4595)
+    
+    df_split <- initial_split(df,  prop = 0.75)
+    
+    df_train <- training(df_split)
+    df_test  <- testing(df_split)
+    
+    lm_model <- linear_reg() %>% set_engine("lm")
+
+    recipe_all <- recipe(FTP ~ week_4_dur + week_6_dur + week_8_dur + week_10_dur+ week_12_dur + 
+                        week_16_dur + week_18_dur+ week_20_dur,
+         data = df_train) 
+
+    lm_wflow <- 
+      workflow() %>% 
+      add_model(lm_model) %>% 
+      add_recipe(recipe_all)
+ 
+    lm_fit <- fit(lm_wflow, df_train)
+    return(lm_fit)
+
+}
+
+lm_fit_min <- train_linear_reg(data_seasons_wider_min_all)
+```
+
+
+RMSE only test data:
+```{r}
+data_test_pred_all_Weeks <- data_test_min %>% bind_cols(predict(lm_fit_min,data_test_min)) %>% 
+                                  rename(FTP_pred = .pred) %>% select(date_test, FTP, FTP_pred, everything())
+
+sqrt(mean((data_test_pred_all_Weeks$FTP - data_test_pred_all_Weeks$FTP_pred)^2))
+```
+
+
+RMSE all data:
+```{r}
+data_test_pred_all_Weeks <- data_seasons_min_wider %>% bind_cols(predict(lm_fit_min, data_seasons_min_wider)) %>% 
+                                  rename(FTP_pred = .pred) %>% select(date_test, FTP, FTP_pred, everything())
+
+sqrt(mean((data_test_pred_all_Weeks$FTP - data_test_pred_all_Weeks$FTP_pred)^2))
+```
+
+
+```{r}
+data_test_pred_all_Weeks %>%
+  ggplot(aes(x = date_test))+
+  geom_point(aes(y= FTP, color = "FTP"))+
+  geom_point(aes(y= FTP_pred, color = "FTP predicted"))+
+  theme_light()
+```
+
+```{r}
+data_test_pred_all_Weeks %>%
+  ggplot(aes(x = week_12_dur))+
+  geom_point(aes(y= FTP, color = "FTP"))+
+  geom_point(aes(y= FTP_pred, color = "FTP predicted"))
+```
+
+#### log10
+
+```{r}
+#from pipeline_features.Rmd:
+data_seasons_wider_min10_all <-  read_csv2("Results/ml/ml_1/duration_ftp_seasons_min10_wider.csv") 
+
+data_seasons_min10_wider <- data_seasons_wider_min10_all %>% filter(!is.na(FTP))
+data_seasons_min10_wider
+```
+
+
+```{r}
+data_log10_min <- data_seasons_min10_wider %>% filter(date_test > as.Date("2016-01-31"))
+
+lm_fit_min10 <- train_linear_reg(data_log10_min)
+```
+
+
+
+
+RMSE all data:
+```{r}
+data_test_pred_all_Weeks <- data_log10_min %>% bind_cols(predict(lm_fit_min10, data_log10_min)) %>% 
+                                  rename(FTP_pred = .pred) %>% select(date_test, FTP, FTP_pred, everything())
+
+sqrt(mean((data_test_pred_all_Weeks$FTP - data_test_pred_all_Weeks$FTP_pred)^2))
+```
+```{r}
+data_test_pred_all_Weeks %>%
+  ggplot(aes(x = date_test))+
+  geom_point(aes(y= FTP, color = "FTP"))+
+  geom_point(aes(y= FTP_pred, color = "FTP predicted"))+
+  theme_light()
+```
+

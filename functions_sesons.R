@@ -74,24 +74,7 @@ generate_season_summary <- function(lactat_data, data_gc, data_intervals_all, du
 }
 
 
-#================= Extract useful intervals================================
 
-
-extract_intervals <- function(df_intervals, device_list, ftp_values,intensity_min = 0.88){
-  # extracts the intervalls which are over intensity_min
-  # uses only data specified in the device_list
-  # intensity = watt_interval / watt_ftp
-  
-  df_intervals <- df_intervals %>% 
-          mutate(device = str_remove_all(device, " ")) %>%
-          filter(device %in% device_list) %>% 
-    left_join(ftp_values, by = "date") %>%
-    mutate(intensity = watt / w_5mmol) %>% 
-    
-    filter(intensity > intensity_min) 
-  
-  return(df_intervals)
-}
 
 
 

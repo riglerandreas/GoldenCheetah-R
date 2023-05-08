@@ -1,3 +1,98 @@
+# Processes the intervals main function
+
+update_intervals <-function(path_activities_gc, path_intervals){
+  #updates the interval result list saved at path_intervals
+  #path_activities_gc .. path of the GoldenCheetah data
+  
+  library("jsonlite")
+  
+  result_old <- read_csv2(path_intervalls)
+  max_date <- result_old %>% summarise(max(date)) %>% pull() 
+  
+  
+  
+  print(str_c("last processed intervals: ", max_date))
+  
+  #if there is new data process and save it
+  if (max_date < Sys.Date()) {
+    max_date = max_date +1
+    
+    #get all new files
+    files_sel <- choose_files(path_activities_raw, max_date,Sys.Date())
+    
+    result_list <- list()
+    for (i in seq_along(files_sel$file_name)) {
+      
+      file_sel <- files_sel[i,]
+      result_list[[i]] <- read_intervals(path_activities_gc, file_sel)
+    }
+    result_new <- bind_rows(result_list)
+    
+    result_new <- result_old %>% bind_rows(result_new) %>% arrange(desc(date))
+    result_new %>% write_csv2(path_intervals) 
+    
+  }else{
+    result_new <- result_old
+  }
+  
+  
+  
+  return(result_new)
+}
+
+
+aggregate_activity_intervals <- function(df){
+  #aggregate the intervals
+  
+  if (sum(names(df) =="HR") == 0) { df <- df %>% mutate(HR = 0)}
+  if (sum(names(df) =="WATTS") == 0) { df <- df %>% mutate(WATTS = 0)}
+  if (sum(names(df) =="CAD") == 0) { df <- df %>% mutate(CAD = 0)}
+  #aggregae the ridedata grouped by interval
+  result <- df %>% group_by(interval_name) %>% filter(!is.na(WATTS) &
+                                                        WATTS > 0 ) %>% 
+    summarise(watt = round(mean(WATTS,na.rm = TRUE)),
+              hr = round(mean(HR, na.rm = TRUE)),
+              interval_hr_max = max(HR, na.rm = TRUE),
+              interval_hr_min = min(HR, na.rm = TRUE),
+              cadence = round(mean(CAD, na.rm = TRUE)),
+              secs = n(),
+              min = round(secs/60,1))
+  return(result)
+}
+
+
+#================= Extract useful intervals================================
+
+extract_intervals <- function(df_intervals, device_list, ftp_values,intensity_min = 0.88){
+  # extracts the intervalls which are over intensity_min
+  # uses only data specified in the device_list
+  # intensity = watt_interval / watt_ftp
+  
+  int_max_sst <- 0.97
+  int_max_ftp <- 1.1
+  
+  df_intervals <- df_intervals %>% 
+    mutate(device = str_remove_all(device, " ")) %>%
+    filter(device %in% device_list) %>% 
+    left_join(ftp_values, by = "date") %>%
+    mutate(intensity = watt / w_5mmol) %>% 
+    
+    filter(intensity > intensity_min) %>%
+    
+    mutate(min_sst = case_when(intensity < int_max_sst ~ min,
+                               TRUE ~ 0),
+           min_ftp = case_when(intensity >= int_max_sst  &
+                               intensity < int_max_ftp~ min,
+                               TRUE ~ 0),
+           min_vo2max = case_when(intensity >= int_max_ftp ~ min,
+                               TRUE ~ 0)
+           )
+  
+  return(df_intervals)
+}
+
+
+#===========================================================================================================
 
 # ======================================= choose the files to process based on dates
 choose_files <- function(file_path, start_date = "2015-01-01", end_date = Sys.Date()){
@@ -81,6 +176,7 @@ read_intervals <- function(pfad_aktivity, file_sel){
 read_gc_data <- function(pfad_aktivity, file_name){
   #read the json data 
   #returns a list of different tibbles of data (e.g. data_ride[[1]]$SAMPLES .. WATT, SECS of the ride)
+  library("jsonlite")
   
   datei <- str_c(pfad_aktivity,file_name)
   data_ride <- read_json(datei)
@@ -153,23 +249,6 @@ label_intervals <- function(ridedata, intervals){
 }
 
 
-aggregate_activity_intervals <- function(df){
-  
-  if (sum(names(df) =="HR") == 0) { df <- df %>% mutate(HR = 0)}
-  if (sum(names(df) =="WATTS") == 0) { df <- df %>% mutate(WATTS = 0)}
-  if (sum(names(df) =="CAD") == 0) { df <- df %>% mutate(CAD = 0)}
-  #aggregae the ridedata grouped by interval
-  result <- df %>% group_by(interval_name) %>% filter(!is.na(WATTS) &
-                                                        WATTS > 0 ) %>% 
-    summarise(watt = round(mean(WATTS,na.rm = TRUE)),
-              hr = round(mean(HR, na.rm = TRUE)),
-              interval_hr_max = max(HR, na.rm = TRUE),
-              interval_hr_min = min(HR, na.rm = TRUE),
-              cadence = round(mean(CAD, na.rm = TRUE)),
-              secs = n(),
-              min = round(secs/60,1))
-  return(result)
-}
 
 
 add_activity_info <- function(df, data_ride, file_name){

@@ -78,7 +78,7 @@ plot_laktat_curves(data_laktat_measurements ,laktat_results %>% filter(test_type
 ```{r}
 
 
-ftp_calculation(data_laktat_measurements, date_selected = "2023-01-07")
+ftp_calculation(data_laktat_measurements, date_selected = "2023-04-03")
 ```
 
 
