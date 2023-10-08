@@ -33,6 +33,7 @@ source("functions_ftp_laktat.R")
 source("functions_import.R")
 source("functions_sesons.R")
 source("functions_intervall.R")
+source("functions_plot_seasons.R")
 ```
 
 ```{r}
@@ -80,46 +81,13 @@ ftp_values %>% mutate(day = yday(date),
 ```
 
 ```{r}
-plot_ftp_data <- ftp_values %>% mutate(day = yday(date),
-                      year = year(date)) %>%
-  group_by(year) %>%
-  mutate(ftp_max_year = max(w_5mmol)) %>%
-  filter(day > 7 &
-           day <= yday(Sys.Date())) %>%
-                     arrange(day) %>% summarise(ftp_start = first(w_5mmol),
-                                                ftp_end = last(w_5mmol),
-                                                ftp_max_year = max(ftp_max_year)) %>%
-  mutate(progress = ftp_end - ftp_start,
-         progress_type = case_when(progress > 0 ~ "positive", TRUE ~ "negative")) %>% arrange(desc(progress)) 
 
-plot_ftp_data%>% mutate(progress_text = str_c(round(progress/ftp_start*100,1), " % ",round(progress), " W")) %>%
-  
 
-ggplot(aes(y = year))+
-  
-  geom_rect(aes(xmin = ftp_start, xmax = ftp_end, ymin = year-0.3, ymax = year+0.3,
-                                            fill = progress_type))+
-  geom_rect(aes(xmin = ftp_start, xmax = ftp_max_year, ymin = year-0.3, ymax = year+0.3),
-            fill = "grey", alpha = 0.5)+
-  geom_rect(aes(xmin = ftp_start, xmax = ftp_start+0.3, ymin = year-0.3, ymax = year+0.3),
-                                            fill = "black")+
-  geom_text(aes(x=ftp_start+(ftp_end-ftp_start)/2, y=year, label=progress_text), size=3.5)+
-  
-  #geom_rect(aes(xmin = 270, xmax = 290, ymin = 2019, ymax = 2019+0.6),
-  #          fill = "grey", alpha = 0.3)+
-  #geom_text(aes(x=280, y=2019.3, label="maximum FTP of this year"), size=3.5)+
-  
-  labs(title = "FTP progress till today per year",
-       caption = "grey .. maximum FTP of this year",
-       x = "FTP [W]",
-       y="")+
-  theme_light()+
-  theme(legend.position = "")
-  
-  
-  
-
+plot_ftp_progress_bar_chart(ftp_values)
 ```
+
+
+
 
 ### Calculate difference and progress
 
@@ -613,8 +581,88 @@ Analyse_seasons_v1.Rmd
 data_gc <-  read_csv(path_activities)
 
 data_gc <- prepare_gc_summary(data_gc)
+
+data_gc %>% summarise( date_min =min(date),
+                       date_max = max(date))
 ```
 
+```{r}
+data_gc %>% filter(L_R >0 &
+                     date > as.Date("2018-01-01")) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=L_R))+
+  geom_vline( aes(xintercept = as.Date("2023-06-13"),color = "Thrombose"))+
+  geom_vline( aes(xintercept = as.Date("2023-09-25"),color = "Intervention"))+
+  geom_vline( aes(xintercept = as.Date("2021-06-05"),color = "Knie Krafttraining"))+
+  geom_vline( aes(xintercept = as.Date("2022-03-13"),color = "Covid"))+
+  
+  labs(title = "L/R")+
+  coord_cartesian(ylim = c(35,65))+
+  theme_light()
+```
+
+```{r}
+rename_difficult <- function(df, col_contains_1, col_contains_2 ="", new_name){
+  #function to rename a column in the df with a complex name (UTF..)
+  #col_contains_1  & _2 are key words which are used to search the right column to rename
+  #
+  
+  col_names_old <- df %>% colnames()
+  
+  col_to_rename <- tibble(colnames = col_names_old) %>% 
+                              filter(str_detect(colnames, col_contains_1)&
+                                      str_detect(colnames, col_contains_2)) %>%
+                                pull()
+  cols_found <- col_to_rename %>% length()
+  
+  if (cols_found == 1 ) {
+    
+    df_renamed <- df %>% rename(!!sym(new_name) := col_to_rename)
+
+    return(df_renamed)
+    
+  }else{
+    print(str_c(cols_found, " found with ",col_contains , "!"))
+  }
+  
+  
+  
+}
+
+
+
+rename_difficult(data_gc, "L_R","",new_name = "5") %>% colnames()
+
+```
+
+
+```{r}
+data_gc %>% filter(Drehmoment_Effektivitaet_Rechts >0 &
+                     date > as.Date("2018-01-01")
+                   ) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=Drehmoment_Effektivitaet_Rechts, color = "rechts"))+
+  geom_point(aes(y=Drehmoment_Effektivitaet_Links, color = "links"))+
+  geom_vline( aes(xintercept = as.Date("2023-06-13"),color = "Thrombose"))+
+  geom_vline( aes(xintercept = as.Date("2023-09-25"),color = "Intervention"))+
+  
+  
+  #coord_cartesian(ylim = c(35,65))+
+  theme_light()
+```
+
+```{r}
+data_gc %>% filter(Drehmoment_Effektivitaet_Rechts >0 &
+                     date > as.Date("2018-01-01")) %>%
+  
+  mutate(label = case_when(date >= as.Date("2023-09-25") ~ "Intervention")) %>%
+  ggplot(aes(x=Drehmoment_Effektivitaet_Rechts))+
+  geom_point(aes(y=Drehmoment_Effektivitaet_Links, color = label))+
+  
+  
+  #coord_cartesian(ylim = c(35,65))+
+  theme_light()
+```
 
 ## Intervals
 
@@ -636,6 +684,7 @@ data_intervals_raw <- update_intervals(path_activities_raw, path_intervalls)
 ### process intervalls
 
 
+
 ```{r}
 # get the real intervals based on the ftp value
 source("functions_intervall.R")
@@ -651,6 +700,9 @@ plot_data_intervall_time <- data_intervals %>% mutate(year = lubridate::year(dat
                                                                   min_vo2max = cumsum(min_vo2max),
                                                                   day = lubridate::yday(date))
 
+
+
+
 behind_plan <- plot_data_intervall_time %>% 
                       filter(date == max(plot_data_intervall_time$date)) %>% 
                             summarise(min = max(min)) %>%
@@ -658,8 +710,20 @@ behind_plan <- plot_data_intervall_time %>%
                                    min_diff = min_plan - min) %>% 
                             select(min_diff) %>% pull()
 
+#add today to the plot data:
+min_last <- plot_data_intervall_time %>% ungroup() %>% 
+                                filter(date == max(date)) %>% select(min) %>% pull()
+
+data_last <- tibble(date = Sys.Date(),
+       min = min_last,
+       year = as.factor(year(date)),
+       day = yday(date))
+
+plot_data_intervall_time <- plot_data_intervall_time %>% bind_rows(data_last)
+
+# plot
 plot_data_intervall_time %>%
-  filter(day < 200 & year %in% c(2016,2017,2018,2021, 2022,2023)) %>%
+  filter(day < 350 & year %in% c(2016,2017,2018,2021, 2022,2023)) %>%
   ggplot(aes(x=day, y = min/60,color = year)) + 
   geom_line() +
   geom_point() +
@@ -702,7 +766,7 @@ duration_21 = plot_data_gc %>% filter(day == yday(Sys.Date()) &
 duration_missing = round(duration_21- duration_today,1)
 
 plot_data_gc %>%
-  filter(day < 200 & year %in% c(2016,2017,2020,2021, 2022,2023)) %>%
+  filter(day < 300 & year %in% c(2016,2017,2020,2021, 2022,2023)) %>%
   ggplot(aes(x=day, y = duration,color = year)) + 
   geom_line() +
   geom_point() +
@@ -714,15 +778,40 @@ plot_data_gc %>%
 ```
 
 ```{r}
+seasons <- c(2016,2017,2020,2021, 2022,2023)
+
+
+
+plot_km_seasons(data_gc, seasons, days_plot = 365, km_goal = 9000)
+```
+
+```{r}
+
+
+
+plot_hm_seasons(data_gc, seasons, days_plot = 365, km_goal = 9000)
+```
+
+```{r}
+
+plot_hm_km(data_gc, seasons)
+
+```
+
+
+
+
+```{r}
 data_intervals %>% mutate(year= year(date)) %>% 
-                  filter(intensity >1 & 
+                  filter(intensity >0.8 & 
                           intensity <1.2 &
                             year %in% c(2016, 2017, 2020, 2021, 2022,2023)) %>% 
   
         select(date:hr, intensity, device,year) %>% 
   ggplot(aes(x = intensity, y = min))+
   geom_point(aes(color = as.factor(year)))+
-  facet_wrap(year~.)
+  facet_wrap(year~.)+
+  theme_light()
 ```
 
 ```{r}

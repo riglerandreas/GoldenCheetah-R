@@ -234,3 +234,56 @@ plot_laktat_curves <- function(laktat_measurements, laktat_results){
   #return(data_predict)
   
 }
+
+#-----------------------------------------------------------------------------------
+
+plot_ftp_progress_bar_chart <- function(df_ftp){
+  
+  df_plot_ftp_data <- df_ftp %>% mutate(day = yday(date),
+                                        year = year(date)) %>%
+    group_by(year) %>%
+    mutate(ftp_max_year = max(w_5mmol),
+           ftp_min_year = min(w_5mmol)) %>%
+    filter(day > 7 &
+             day <= yday(Sys.Date())) %>%
+    arrange(day) %>% summarise(ftp_start = first(w_5mmol),
+                               ftp_end = last(w_5mmol),
+                               ftp_max_year = max(ftp_max_year),
+                               ftp_min_year = min(ftp_min_year)) %>%
+    mutate(progress = ftp_end - ftp_start,
+           progress_type = case_when(progress > 0 ~ "positive",
+                                     TRUE ~ "negative")) %>% 
+    arrange(desc(progress)) 
+  
+  
+  
+  plot_ftp_data %>% 
+    mutate(progress_text = str_c(round(progress/ftp_start*100,1),
+                                 " % ",round(progress), " W")) %>%
+    
+    
+    ggplot(aes(y = year))+
+    
+    geom_rect(aes(xmin = ftp_start, xmax = ftp_end, ymin = year-0.3, ymax = year+0.3,
+                  fill = progress_type))+
+    geom_rect(aes(xmin = ftp_start, xmax = ftp_max_year, ymin = year-0.3, ymax = year+0.3),
+              fill = "grey", alpha = 0.5)+
+    geom_rect(aes(xmin = ftp_start, xmax = ftp_min_year, ymin = year-0.3, ymax = year+0.3),
+              fill = "grey", alpha = 0.5)+
+    geom_rect(aes(xmin = ftp_start, xmax = ftp_start+0.3, ymin = year-0.3, ymax = year+0.3),
+              fill = "black")+
+    geom_text(aes(x=ftp_start+(ftp_end-ftp_start)/2, y=year, label=progress_text), size=3.5)+
+    
+    #geom_rect(aes(xmin = 270, xmax = 290, ymin = 2019, ymax = 2019+0.6),
+    #          fill = "grey", alpha = 0.3)+
+    #geom_text(aes(x=280, y=2019.3, label="maximum FTP of this year"), size=3.5)+
+    
+    labs(title = "FTP progress till today per year",
+         caption = "grey .. minimum and maximum FTP of this year",
+         x = "FTP [W]",
+         y="")+
+    theme_light()+
+    theme(legend.position = "")
+  
+  
+}

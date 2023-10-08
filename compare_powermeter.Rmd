@@ -38,8 +38,8 @@ path_activities_raw <- "C:/Users/rigle/AppData/Local/GoldenCheetah/Andl/activiti
 ```{r}
 tibble(files = list.files(path_activities_raw)) %>% arrange(desc(files))
 
-file_garmin = "2023_04_16_16_25_41.json"
-file_p2max = "2023_04_15_11_29_13.json"
+file_garmin = "2023_08_07_17_09_45.json"#"2023_04_16_16_25_41.json"
+file_p2max = "2023_08_07_17_08_20.json"#"2023_04_15_11_29_13.json"
 ```
 
 
@@ -51,10 +51,10 @@ data_p2max <- read_gc_data(path_activities_raw, file_p2max)
 ```{r}
 data_garmin <- get_activity_data(data_garmin)
 
-#data_garmin %>% 
-  write_csv2("Results/power_meter_comparison/2023_04_16_p2max_crosser_element_kalib_data.csv")
+data_garmin #%>% 
+  #write_csv2("Results/power_meter_comparison/2023_08_07_vektor2_data.csv")
 data_p2max <- get_activity_data(data_p2max)
-#data_p2max %>% write_csv2("Results/power_meter_comparison/2023_04_15_p2max_data.csv.csv")
+#data_p2max %>% write_csv2("Results/power_meter_comparison/2023_08_07_p2max_data.csv")
 ```
 
 ```{r}
@@ -65,8 +65,8 @@ list.files(path_results)
 
 ```{r}
 
-file_garmin <- "2023_04_16_garmin_crosser_uhr_kalib_data.csv"
-file_p2max <- "2023_04_16_p2max_crosser_uhr_kalib_data.csv"
+file_garmin <- "2023_08_07_vektor2_data.csv"
+file_p2max <- "2023_08_07_p2max_data.csv"
 
 data_garmin <- read_csv2(str_c(path_results, file_garmin))
 data_p2max <- read_csv2(str_c(path_results, file_p2max))
@@ -81,11 +81,11 @@ data_garmin %>%
 ```
 
 ```{r}
-secs_min = 1100
-secs_max = 1300
+secs_min = 1500
+secs_max = 2000
 
-data_garmin %>% mutate(SECS = SECS-6 ,
-                        WATTS = WATTS -12) %>% filter( SECS > secs_min &
+data_garmin %>% mutate(SECS = SECS+18 ,
+                        WATTS = WATTS -8) %>% filter( SECS > secs_min &
                           SECS < secs_max) %>%
   ggplot(aes(x= SECS)) + 
   geom_line(aes(y= WATTS, color = "garmin")) +
@@ -95,7 +95,7 @@ data_garmin %>% mutate(SECS = SECS-6 ,
 
 ```{r}
 
-data_garmin %>% mutate(SECS = SECS+2) %>%
+data_garmin %>% mutate(SECS = SECS+18) %>%
   ggplot(aes(x= SECS)) + 
   geom_line(aes(y= HR, color = "garmin")) +
   geom_line(data = data_p2max,aes(y= HR, color = "p2max"))+
@@ -104,7 +104,7 @@ data_garmin %>% mutate(SECS = SECS+2) %>%
 
 ```{r}
 
-data_garmin %>% mutate(SECS = SECS-5) %>%
+data_garmin %>% mutate(SECS = SECS+18) %>%
   ggplot(aes(x= SECS)) + 
   geom_line(aes(y= HR, color = "garmin")) +
   geom_line(data = data_p2max,aes(y= HR, color = "p2max"))+
@@ -113,7 +113,7 @@ data_garmin %>% mutate(SECS = SECS-5) %>%
 
 
 ```{r}
-data_p2max_garmin <- data_garmin %>% mutate(SECS = SECS+2) %>% 
+data_p2max_garmin <- data_garmin %>% mutate(SECS = SECS+18) %>% 
                                       left_join(data_p2max, 
                                                 by = "SECS", 
                                                 suffix = c("_garmin", "_p2max")) %>%
@@ -121,7 +121,7 @@ data_p2max_garmin <- data_garmin %>% mutate(SECS = SECS+2) %>%
 ```
 
 ```{r}
-data_p2max_garmin %>% write_csv2("Results/power_meter_comparison/2023_04_16_powermeter_p2max_crosser_vs_garmin_uhr_kalib.csv")
+data_p2max_garmin #%>% write_csv2("Results/power_meter_comparison/2023_08_07_powermeter_p2max_vs_garmin.csv")
 ```
 
 

@@ -28,6 +28,7 @@ source("functions_sesons.R")
 
 ## Einlesen
 
+### laktat values read and check 
 
 Read the Laktat Test measuremnt values:
 
@@ -67,13 +68,22 @@ laktat_results<- read_csv2(str_c(path_laktat,"laktat_watt_ftp.csv")) %>% mutate(
 
 
 
-#### Check mmol values for all dates 
+  #### Check mmol values for all dates 
 
 ```{r}
 
 
 plot_laktat_curves(data_laktat_measurements ,laktat_results %>% filter(test_type == "Laktat"))
 ```
+
+```{r}
+date_sel <- as.POSIXct("2023-08-07")
+
+plot_laktat_curves(data_laktat_measurements %>% 
+                     filter(date== date_sel),laktat_results %>% filter(test_type == "Laktat" &
+                                                                         date== date_sel))
+```
+
 
 ```{r}
 

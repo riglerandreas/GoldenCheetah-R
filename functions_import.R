@@ -8,7 +8,8 @@ prepare_gc_summary <- function(df){
     
     df <- df %>% select( date, everything(), -Datum, -dauer) %>% 
                                                                 rename("hr" = "hf_mean",
-                                                                       "duration" = "zeit_in_bewegung") 
+                                                                       "duration" = "zeit_in_bewegung",
+                                                                       "L_R" = "Links/Rechts Verteilung") 
     
     df <- df %>% filter(duration >0)
     df <- df %>% mutate(hr_watt = case_when((w_mean >0) & (hr >0) ~ hr/w_mean))
