@@ -257,7 +257,7 @@ plot_ftp_progress_bar_chart <- function(df_ftp){
   
   
   
-  plot_ftp_data %>% 
+  df_plot_ftp_data %>% 
     mutate(progress_text = str_c(round(progress/ftp_start*100,1),
                                  " % ",round(progress), " W")) %>%
     

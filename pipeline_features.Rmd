@@ -34,6 +34,7 @@ source("functions_import.R")
 source("functions_sesons.R")
 source("functions_intervall.R")
 source("functions_plot_seasons.R")
+source("functions_ftp_laktat.R")
 ```
 
 ```{r}
@@ -766,7 +767,7 @@ duration_21 = plot_data_gc %>% filter(day == yday(Sys.Date()) &
 duration_missing = round(duration_21- duration_today,1)
 
 plot_data_gc %>%
-  filter(day < 300 & year %in% c(2016,2017,2020,2021, 2022,2023)) %>%
+  filter(day < 360 & year %in% c(2016,2017,2020,2021, 2022,2023)) %>%
   ggplot(aes(x=day, y = duration,color = year)) + 
   geom_line() +
   geom_point() +
