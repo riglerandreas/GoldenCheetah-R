@@ -1,0 +1,507 @@
+---
+title: "analyse_laktat_seasons"
+author: "ari"
+date: "1 6 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+library(readxl)
+
+library(patchwork)
+library(GGally)
+
+source("functions/aggregate_seasons.R")
+```
+
+get the laktat data:
+- dates and calculated values
+- aggregate history of the 8 weeks before
+
+
+### read Laktat test data
+```{r}
+
+path_laktat <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+
+lactat_calculated  <-read_csv2(str_c(path_laktat,"laktat_watt.csv")) %>% rename("date" = "datum")
+
+
+hour_of_power = tibble(date = as.Date(c("2017-05-22", "2017-03-24", "2016-07-20")),
+                       w_5mmol = c(286, 282, 261))
+
+
+lactat_calculated <- lactat_calculated  %>%  
+                                            bind_rows(hour_of_power) %>% 
+                          distinct(date, .keep_all = TRUE)
+
+
+```
+
+
+
+### Read export data from Goldencheetah
+
+```{r}
+data_gc <- read_gc_data("Results/goldencheetah_tss.csv")
+```
+
+```{r}
+data_gc %>% group_by(year(date)) %>% count() 
+```
+
+
+
+
+
+```{r}
+data_gc %>% ggplot(aes(x=date))+
+  geom_point(aes(y = hr_watt) )+
+  geom_smooth((aes(y=hr_watt)))+
+  coord_cartesian(ylim = c(0,2))
+```
+
+```{r}
+data_gc %>% ggplot(aes(x=date))+
+  geom_point(aes(y = duration) )+
+  geom_smooth((aes(y=duration)))
+```
+
+```{r}
+data_gc %>% mutate(week = week(date),
+                   year = year(date)) %>%
+  group_by(year,week) %>% 
+  summarise(TSS =sum(TSS,na.rm = TRUE),
+            date =min(date)) %>%
+ggplot(aes(x=date))+
+  geom_point(aes(y = TSS) )+
+  geom_smooth((aes(y=TSS)))+
+  labs(y = "TSS/ week")+
+  theme_light()
+```
+
+```{r}
+data_gc %>% mutate(week = week(date),
+                   year = year(date)) %>%
+  group_by(year,week) %>% 
+  summarise(duration =sum(duration,na.rm = TRUE),
+            TSS =sum(TSS,na.rm = TRUE),
+            date =min(date)) %>%
+  mutate(TSS_duration = TSS/duration) %>%
+ggplot(aes(x=date))+
+  geom_point(aes(y = TSS_duration) )+
+  geom_smooth((aes(y=TSS_duration)))+
+  labs(y = "TSS/ duration / week")+
+  theme_light()
+```
+
+```{r}
+data_gc %>% mutate(week = week(date),
+                   year = year(date)) %>%
+  group_by(year,week) %>% 
+  summarise(watt =mean(w_mean,na.rm = TRUE),
+            hr =mean(hr,na.rm = TRUE),
+            date =min(date)) %>%
+  mutate(hr_watt = hr/watt) %>%
+  
+  filter(hr_watt < 1.5) %>%
+  
+ggplot(aes(x=date))+
+  geom_point(aes(y = hr_watt) )+
+  geom_smooth((aes(y=hr_watt)))+
+  geom_hline(yintercept = 0.8)+
+  #coord_cartesian(ylim = c(0,3))+
+  labs(y = "hr/ watt / week")+
+  theme_light()
+```
+
+
+
+### Summarise the metrics for each season
+
+## Funkfunctions/aggregate_seasons.Rion Wochen Aggregation
+```{r}
+data_season <- generate_season_summary(lactat_calculated, data_gc, duration_weeks = 12)
+```
+
+```{r}
+plot_w_duration <- function(plot_data, duration_weeks){
+  
+  plt_duration <- plot_data %>% 
+    ggplot(aes(y=w_2mmol))+
+    geom_jitter(aes(x=duration, color = year))+
+    #geom_vline(xintercept = activities_today$TSS)+
+    geom_line(aes(x=duration, group = year, color = year))+
+    labs(title = str_c("duration last ", duration_weeks, " weeks"))+
+    theme_light()
+  
+  plt_tss <- plot_data %>% 
+    ggplot(aes(y=w_2mmol))+
+    geom_jitter(aes(x=TSS, color = year))+
+    #geom_vline(xintercept = activities_today$TSS)+
+    geom_line(aes(x=TSS, group = year, color = year))+
+    geom_smooth(aes(x=TSS))+
+    labs(title = str_c("TSS last ", duration_weeks, " weeks"))+
+    theme_light()
+  
+  p_result = plt_duration / plt_tss
+  return(p_result)
+  
+}
+
+plot_w_duration(data_season, 12)
+```
+
+
+```{r}
+
+
+duration_weeks =12 
+calc_and_plot(lactat_calculated, data_gc,duration_weeks = 12)
+```
+
+```{r}
+calc_and_plot(lactat_calculated, data_gc, 10)
+```
+
+
+```{r}
+calc_and_plot(lactat_calculated, data_gc, 11)
+```
+
+#### Ausgangspunkt Leistung von Season finden
+
+```{r}
+lactat_calculated%>% arrange(date) %>% mutate(days = (date-lag(date)-12*7)) %>% arrange(desc(date))
+```
+
+
+Ergänzen mit es darf nicht in der zukunft liegen
+
+```{r}
+lactat_dates <- lactat_calculated %>% select(date)
+result <- c()
+
+i_n=1
+
+for (i in seq_along(lactat_dates$date)) {
+  for (ii in seq_along(lactat_dates$date)) {
+      result_ii = tibble(date = lactat_dates$date[ii]) %>%
+        mutate(date_other = lactat_calculated$date[i],
+          days = date - date_other)
+    result[[i_n]] <- result_ii  
+  i_n = i_n +1
+  }
+}
+
+dates_crossed <- bind_rows(result) %>% filter(date != date_other)
+
+
+result_diff <- c()
+for (weeks in c(4:20)) {
+mean_diff = dates_crossed %>% group_by(date) %>%
+                      mutate(season_diff = abs(days-7*weeks),
+                             season_diff = as.integer(season_diff),
+                             best_diff = min(abs(season_diff)))  %>% #filter(date == "2020-05-05")
+                      filter(season_diff == best_diff) %>% ungroup() %>%
+  summarise(mean_diff = mean(season_diff)) %>% mutate(weeks = weeks)  
+  
+result_diff[[weeks]] <- mean_diff
+
+}
+
+bind_rows(result_diff) %>% ggplot(aes(x=weeks))+ geom_line(aes(y=mean_diff))
+```
+
+##### ftp change
+```{r}
+ftp_change <- lactat_calculated%>% arrange(date) %>% mutate(w_5mmol_past = lag(w_5mmol),
+                                              w_5mmol_change = w_5mmol - w_5mmol_past,
+                                              date_past = lag(date),
+                                              days = date - date_past,
+                                              days = as.numeric(days)) %>% 
+                  filter(!is.na(w_5mmol_past)) %>% select(date, date_past, days, w_5mmol_change)
+
+ftp_change
+```
+
+```{r}
+ftp_change %>% 
+  ggplot(aes(days)) + 
+  geom_histogram(binwidth = 7)+
+  geom_vline(xintercept = 12*7)
+```
+
+
+```{r}
+data_season %>% left_join(ftp_change, by= c("date_test"="date")) %>%
+  filter(days <100) %>%
+  
+  ggplot(aes(x= TSS))+
+  geom_point(aes(y= w_5mmol_change, size = duration, color = year))
+```
+
+```{r}
+ftp_change %>% filter(year(date) == 2021 & days <100)
+```
+
+```{r}
+ftp_change %>% ggplot(aes(x=date))+
+  geom_point(aes(y= w_5mmol_change))
+```
+
+Funtkion schreiben:
+rechnet sich tage zu jedem datum aus
+berechnet die differenz zu 12 wochen
+--> geringste differenz (ausgenommen gleiches datum oder datum zu nahe (8 wochen? )) 
+wird genommen
+
+vielleicht nested funktion --> tibble mit datum und und differenztagen danach das minimum nehmen und unnesten 
+```{r}
+
+
+ftp_change_list <- c()
+
+for (i in seq_along(lactat_calculated$date)) {
+  test_date = lactat_calculated$date[i]
+  test_w_5mmol = lactat_calculated$w_5mmol[i]
+  
+  ftp_change_list[[i]] <- lactat_calculated %>% 
+                      mutate(days_diff = as.numeric(test_date - date ),
+                             date_past = date,
+                             date = test_date,
+                             w_5mmol_past = w_5mmol,
+                             w_5mmol_change = test_w_5mmol - w_5mmol_past,
+                             w_5mmol = test_w_5mmol) %>% 
+                  filter(days_diff > 4*7 &
+                           days_diff < 150) %>%
+                  filter(days_diff == min(days_diff))# %>%
+                    #select(date, date_past, days_diff,w_5mmol_change)
+  
+}
+ftp_change <- bind_rows(ftp_change_list) %>% arrange(desc(date))
+ftp_change
+```
+
+```{r}
+ ftp_change%>% left_join(data_season, by= c("date" = "date_test")) %>%
+  
+  ggplot(aes(x= TSS))+
+  geom_point(aes(y= w_5mmol_change, size = duration, color = year))
+```
+
+```{r}
+ ftp_change%>% left_join(data_season, by= c("date" = "date_test")) %>%
+  
+  ggplot(aes(x= duration))+
+  geom_point(aes(y= w_5mmol_change, size = duration, color = year))
+```
+
+```{r}
+ ftp_change%>% left_join(data_season, by= c("date" = "date_test")) %>%
+  mutate(cat_w5mmol_change = case_when(w_5mmol_change < -20 ~ "< -20",
+                                       w_5mmol_change < 0 ~ "< 0",
+                                       w_5mmol_change < 10 ~ "< 10",
+                                       w_5mmol_change >10 ~ ">10"))%>%
+  
+  ggplot(aes(x= duration))+
+  geom_point(aes(y= TSS, color =cat_w5mmol_change), size =5)
+```
+## In einer Funktion zusammenführen
+--> in einer funktion zusammenführen, gesteuert über trainings wochen
+
+```{r}
+
+calculate_ftp_change <- function(df,weeks_min =4 , weeks_max =22) {
+  ftp_change_list <- c()
+
+  for (i in seq_along(df$date)) {
+    test_date = df$date[i]
+    test_w_5mmol = df$w_5mmol[i]
+    
+    ftp_change_list[[i]] <- df %>% 
+                        mutate(days_diff = as.numeric(test_date - date ),
+                               date_past = date,
+                               date = test_date,
+                               w_5mmol_past = w_5mmol,
+                               w_5mmol_change = test_w_5mmol - w_5mmol_past,
+                               w_5mmol = test_w_5mmol) %>% 
+                    filter(days_diff > weeks_min*7 &
+                             days_diff < weeks_max*7) %>%
+                    filter(days_diff == min(days_diff)) %>%
+                      select(date, date_past, days_diff,w_5mmol_change)
+    
+  }
+  ftp_change <- bind_rows(ftp_change_list) %>% arrange(desc(date))
+  ftp_change
+  
+  return(ftp_change)
+  
+  
+}
+
+
+
+ftp_change <- calculate_ftp_change(lactat_calculated, weeks_min = 8, weeks_max =30)
+data_season <- generate_season_summary(lactat_calculated, data_gc, duration_weeks = 12)
+
+ftp_change%>% left_join(data_season, by= c("date" = "date_test"))
+```
+
+#### ftp interpolieren
+```{r}
+lactat_calculated %>% 
+  ggplot(aes(x = date))+
+  geom_point(aes(y=w_5mmol))+
+  geom_line(aes(y=w_5mmol))+geom_smooth(aes(y=w_5mmol))
+```
+
+```{r message=FALSE, warning=FALSE}
+duration_weeks =4
+
+data_plot <- generate_season_summary(lactat_calculated, data_gc, duration_weeks) %>% 
+  
+pivot_longer(cols = c(w_5mmol, TSS, duration)) 
+
+plot_1 <- data_plot %>%
+
+    ggplot(aes(x = date_test))+
+  geom_point(aes(y=value, color = name))+
+  geom_line(aes(y=value))+
+  
+  geom_smooth(aes(y=value, color = name))+
+  facet_wrap(name~., ncol = 1, scales = "free_y")+
+  labs(title= str_c("weeks: ",duration_weeks))
+
+plot_2 <- data_plot %>%
+  group_by(name) %>% 
+  
+    mutate(value_scaled = (value- min(value,na.rm = TRUE)) / (max(value,na.rm = TRUE) - min(value,na.rm = TRUE))) %>%
+
+    ggplot(aes(x = date_test))+
+    geom_smooth(aes(y=value_scaled, color = name))+
+  labs(title= str_c("weeks: ",duration_weeks))
+
+plot_1 / plot_2
+```
+
+
+```{r}
+test_data = tibble(date = as.Date(c("2022-01-01", "2022-03-01", "2022-04-01", "2022-04-28")),
+                   w_5mmol = c(100,200,100,200))
+
+n_days_past = 30
+
+test_data %>% mutate(w_5_past = lag(w_5mmol),
+                     days = as.numeric(date - lag(date)),
+                     w_5_estimate = (w_5mmol - w_5_past)/days * (days-n_days_past) +  w_5_past )
+```
+
+
+#  ALTES ----------------------------------
+
+```{r}
+files <- tibble(files = list.files("Results/")) %>% filter(str_detect(files,"ml_data_2")) %>% 
+                mutate(files = str_c("Results/",files)) %>% pull()
+files
+
+
+aggregate_raw_data <- function(data){
+  data_aggregated <- data %>% group_by(date,device, workout_code, start_time) %>%
+                                
+                                    summarise(duration_sec = max(sec),
+                                               watt = mean(watt),
+                                              hr = mean(hr))
+  
+  return(data_aggregated)
+}
+
+
+
+data_aggregated_list <- list()
+for (i in seq_along(files)) {
+    data_raw<- read_rds(files[i])
+    data_aggregated_list[[i]] <- data_raw %>% aggregate_raw_data()
+    
+  
+}
+
+data_aggregated <- bind_rows(data_aggregated_list)
+
+data_aggregated
+```
+
+
+```{r}
+activites_aggregated_list <- list()
+for (i in seq_along(lactat_calculated$date)) {
+  date_start = lactat_calculated$date_start[i]
+  date_end = lactat_calculated$date[i]
+  
+  w_2mmol <- lactat_calculated$w_2mmol[i]
+  w_5mmol <- lactat_calculated$w_5mmol[i]
+  
+  dates = tibble(date = seq(ymd(date_start), ymd(date_end), by = "1 day"))
+  
+  activities_data <- dates %>% left_join(data_aggregated) %>% filter(!is.na(workout_code))  
+  
+  activites_aggregated_list[[i]] <- activities_data %>% summarise(n = n(),
+                                                       hr_time = sum(hr*duration_sec),
+                                                       watt_time = sum(watt*duration_sec),
+                                                       duration_sec_sum = sum(duration_sec)) %>%
+                              mutate(duration = round(duration_sec_sum/3600,1),
+                                     watt = watt_time / duration_sec_sum,
+                                     hr = hr_time / duration_sec_sum,
+                                     date_test = date_end,
+                                     w_2mmol = w_2mmol,
+                                     w_5mmol = w_5mmol)
+  
+}
+
+activites_aggregated <- activites_aggregated_list %>% bind_rows()
+
+activites_aggregated %>%
+  ggplot(aes(x=date_test))+
+  geom_line(aes(y = duration, color = "duration"))+
+  geom_line(aes(y = w_2mmol, color = "2mmol"))+
+  geom_line(aes(y = w_5mmol, color = "5mmol"))+
+  geom_line(aes(y = hr, color = "hr"))+
+  geom_line(aes(y = watt, color = "watt"))
+```
+
+```{r message=FALSE, warning=FALSE}
+
+activites_aggregated %>%select(duration, w_2mmol, w_5mmol,watt, hr) %>% ggpairs()
+
+```
+
+```{r}
+activites_aggregated %>%select(date_test, duration, w_2mmol, w_5mmol,n) %>% 
+      filter(w_2mmol > 190 & duration <20)
+```
+
+
+### read trainings data
+```{r}
+data_2016_raw<- read_rds( "Results/test_ml_data_2016.rds")
+
+data_2017_raw<- read_rds( "Results/test_ml_data_2017.rds")
+
+data_2018_raw<- read_rds( "Results/test_ml_data_2018.rds")
+
+data_2019_raw<- read_rds( "Results/test_ml_data_2019.rds")
+
+data_2020_raw<- read_rds( "Results/test_ml_data_2020.rds")
+
+data_2021_raw<- read_rds( "Results/test_ml_data_2021.rds")
+
+data_2021_raw %>% summarise(max(date))
+```
+

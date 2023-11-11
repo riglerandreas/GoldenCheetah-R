@@ -2,3 +2,4 @@ Results/
 Data/
 *.rds
 .Rproj.user
+*.Rhistory*

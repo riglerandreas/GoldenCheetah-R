@@ -119,6 +119,7 @@ data_model_2021 <- data_to_minute(data_2021_raw) %>% data_features()
 data_model_all <- data_model_2016 %>% bind_rows(data_model_2017) %>% bind_rows(data_model_2018)%>%
                                       bind_rows(data_model_2019) %>% 
                                       bind_rows(data_model_2020) %>% bind_rows(data_model_2021)
+
 ```
 
 
@@ -190,7 +191,7 @@ Bei **Sufferfest Cadence Builds Neuromuskulaer** performt es nicht besonders - d
 BE GA1 3h einheiten auch nicht am Ende (die hf drift) --> Meßwert wie weit driftet die hf nach 1h, 2h,..
 
 ```{r}
-selected_files_er10 <- result_quality %>% filter(pred_error >10)
+selected_files_er10 <- result_quality_rf %>% filter(pred_error >10)
 selected_files_er10
 ```
 
@@ -210,7 +211,7 @@ result_rf %>% filter(file_name %in% selected_files_er10$file_name[1:3]) %>%
 ```
 
 ```{r}
-selected_files_ga1 <- result_quality %>% filter(pred_error >5 & 
+selected_files_ga1 <- result_quality_rf %>% filter(pred_error >5 & 
                                             pred_error <10) %>% filter(str_detect(workout_code, "GA"))
 selected_files_ga1
 ```
@@ -225,9 +226,10 @@ result_rf %>% filter(file_name %in% selected_files_ga1$file_name[1:3]) %>%
   #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
    #         aes(y=hr_pred, color ="prediction old"))+
   geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
-  facet_wrap(workout_code ~ ., nrow = 3)+
+  facet_wrap(workout_code ~ ., nrow = 3,scales  = "free_x")+
   labs(title = "prediction of never seen  test data",
-       colour = "")
+       colour = "")+
+  theme_light()
 ```
 
 ## XGB
@@ -236,9 +238,9 @@ performt anscheinend besser als rf
 
 ### Predict
 ```{r}
-result_xgb <- data_model %>%
+result_xgb <- data_model_all %>%
                   bind_cols(
-                    predict(final_fit_xgb, new_data = data_model) %>% rename("hr_pred" = ".pred")
+                    predict(final_fit_xgb, new_data = data_model_all) %>% rename("hr_pred" = ".pred")
                   ) %>% mutate(set = "test")
 ```
 
@@ -270,23 +272,24 @@ Bei **Sufferfest Cadence Builds Neuromuskulaer** performt es nicht besonders - d
 BE GA1 3h einheiten auch nicht am Ende (die hf drift) --> Meßwert wie weit driftet die hf nach 1h, 2h,..
 
 ```{r}
-selected_files <- result_quality %>% filter(pred_error >10)
+selected_files <- result_quality_xgb %>% filter(pred_error >10) %>% arrange(desc(pred_error))
 selected_files
 ```
 
 
 
 ```{r}
-result_xgb %>% filter(file_name %in% selected_files_ga1$file_name[1:3]) %>%
+result_xgb %>% filter(file_name %in% selected_files$file_name[1:5]) %>%
   ggplot(aes(x=minute))+
   geom_line(aes(y=hr, color = "hr"))+
   geom_line(aes(y=hr_pred, color ="prediction"))+
   #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
    #         aes(y=hr_pred, color ="prediction old"))+
   geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
-  facet_wrap(workout_code ~ ., nrow = 3)+
+  facet_wrap(workout_code ~ ., nrow = 3, scales = "free_x")+
   labs(title = "prediction of never seen  test data",
-       colour = "")
+       colour = "")+
+  theme_light()
 ```
 
 ##Compare XGB RF
@@ -302,9 +305,10 @@ result_all %>% filter(file_name %in% selected_files_er10$file_name[]) %>%
   #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
    #         aes(y=hr_pred, color ="prediction old"))+
   #geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
-  facet_wrap(workout_code ~ ., nrow = 4)+
+  facet_wrap(workout_code ~ ., nrow = 4, scales = "free_x")+
   labs(title = "prediction of never seen  test data",
-       colour = "")
+       colour = "")+
+  theme_light()
 ```
 
 ```{r}

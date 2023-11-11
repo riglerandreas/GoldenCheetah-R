@@ -1,0 +1,287 @@
+---
+title: "L/ R Ballance"
+author: "ari"
+date: '2023-10-08'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+
+source("functions_intervall.R")
+source("functions_import.R")
+```
+
+```{r}
+path_activities <- "C:/Users/rigle/AppData/Local/GoldenCheetah/Andl/activities/"
+path_gc_export <- "Results/goldencheetah_tss.csv"
+
+file_sel <- "2023_10_06_08_14_31.json"
+file_sel2 <- "2023_09_16_09_30_45.json"
+
+path_file <- str_c(path_activities, file_sel)
+```
+
+
+
+```{r}
+data_gc_export <-  read_csv(path_gc_export)
+
+data_gc_export <- prepare_gc_summary(data_gc_export)
+
+data_gc_export %>% summarise( date_min =min(date),
+                       date_max = max(date))
+```
+
+```{r}
+#only to get the device per day
+path_intervalls = "Results/intervall_aggregation.csv"
+data_intervalls <- read_csv2(path_intervalls)
+
+device_per_day <- data_intervalls %>% filter(!is.na(device)) %>% distinct(date,device) %>% 
+  group_by(date) %>% mutate(n=n()) %>% filter(n == 1)# if there is n =2 it`s not clear whats true..
+
+
+data_lr_device <- data_gc_export %>% left_join(device_per_day %>% select(-n), by = "date")
+
+```
+
+
+```{r}
+data_lr_device %>% filter(L_R >0 &
+                     date > as.Date("2018-01-01")) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=L_R, color = device))+
+  geom_vline( aes(xintercept = as.Date("2023-06-13"),color = "Thrombose"))+
+  geom_vline( aes(xintercept = as.Date("2023-09-25"),color = "Intervention"))+
+  geom_vline( aes(xintercept = as.Date("2021-06-05"),color = "Knie Krafttraining"))+
+  geom_vline( aes(xintercept = as.Date("2022-03-13"),color = "Covid"))+
+  
+  geom_vline( aes(xintercept = as.Date("2023-11-02"),color = "Garmin neu montiert"))+
+  
+  labs(title = "L/R")+
+  coord_cartesian(ylim = c(35,65))+
+  theme_light()
+```
+
+```{r}
+data_plot <- data_lr_device %>% filter(L_R >0 &
+                     date > as.Date("2018-01-01")) %>%
+  mutate(year = lubridate::year(date)) 
+
+
+data_plot_mean <- data_plot %>% group_by(year, device) %>% summarise(L_R = mean(L_R)) %>% filter(!is.na(device))
+
+data_plot %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=L_R, color = device))+
+  geom_vline( aes(xintercept = as.Date("2023-06-13"),color = "Thrombose"))+
+  geom_vline( aes(xintercept = as.Date("2023-09-25"),color = "Intervention"))+
+  geom_vline( aes(xintercept = as.Date("2021-06-05"),color = "Knie Krafttraining"))+
+  geom_vline( aes(xintercept = as.Date("2022-03-13"),color = "Covid"))+
+  geom_hline(data = data_plot_mean, aes(yintercept = L_R, color = device), linetype = 2)+
+  
+  labs(title = "L/R")+
+  coord_cartesian(ylim = c(35,65))+
+  facet_wrap(year~., scales = "free_x")+
+  theme_light()
+```
+
+```{r}
+data_gc_export %>% filter(Drehmoment_Effektivitaet_Rechts >0 &
+                     date > as.Date("2018-01-01")) %>%
+  mutate(year = lubridate::year(date)) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=Drehmoment_Effektivitaet_Links, color = "left"))+
+  geom_smooth(aes(y=Drehmoment_Effektivitaet_Links, color = "left"))+
+  geom_point(aes(y=Drehmoment_Effektivitaet_Rechts, color = "right"))+
+  geom_smooth(aes(y=Drehmoment_Effektivitaet_Rechts, color = "right"))+
+  geom_vline( aes(xintercept = as.Date("2023-06-13"),color = "Thrombose"))+
+  geom_vline( aes(xintercept = as.Date("2023-09-25"),color = "Intervention"))+
+  
+  labs(title = "Drehmoment_Effektivitaet")+
+  #coord_cartesian(ylim = c(35,65))+
+  facet_wrap(year~., scales = "free_x")+
+  theme_light()
+```
+
+```{r}
+data_gc_export %>% filter(Gleichmaessigkeit_des_Tretens_Links >0 &
+                     date > as.Date("2018-01-01")) %>%
+  mutate(year = lubridate::year(date)) %>%
+  ggplot(aes(x=date))+
+  geom_point(aes(y=Gleichmaessigkeit_des_Tretens_Links, color = "left"))+
+  geom_smooth(aes(y=Gleichmaessigkeit_des_Tretens_Links, color = "left"))+
+  geom_point(aes(y=Gleichmaessigkeit_des_Tretens_Rechts, color = "right"))+
+  geom_smooth(aes(y=Gleichmaessigkeit_des_Tretens_Rechts, color = "right"))+
+  geom_vline( aes(xintercept = as.Date("2023-06-13"),color = "Thrombose"))+
+  geom_vline( aes(xintercept = as.Date("2023-09-25"),color = "Intervention"))+
+  
+  labs(title = "Gleichmaessigkeit_des_Tretens")+
+  #coord_cartesian(ylim = c(35,65))+
+  facet_wrap(year~., scales = "free_x")+
+  theme_light()
+
+ 
+```
+
+```{r}
+data_gc_export %>% filter(Gleichmaessigkeit_des_Tretens_Links >0 &
+                     date > as.Date("2018-01-01"))  %>%
+  ggplot()+
+  geom_point(aes(x=Drehmoment_Effektivitaet_Links, y=Gleichmaessigkeit_des_Tretens_Links, color = "left", 
+                 size = L_R), alpha = 1/3)+
+  geom_point(aes(x=Drehmoment_Effektivitaet_Rechts, y=Gleichmaessigkeit_des_Tretens_Rechts, color = "right", size = L_R), alpha = 1/3)+
+  
+  labs(title = "",
+       x = "Drehmoment_Effektivitaet",
+       y = "Gleichmaessigkeit_des_Tretens")+
+  #coord_cartesian(ylim = c(35,65))+
+  theme_light()
+
+```
+
+
+
+```{r}
+data_ride_list_raw <- read_gc_data(path_activities, file_sel)
+data_ride <- get_activity_data(data_ride_list_raw)
+
+data_ride_list_raw2 <- read_gc_data(path_activities, file_sel2)
+data_ride2 <- get_activity_data(data_ride_list_raw2)
+
+data_ride_list_raw$RIDE$XDATA %>% colnames()
+```
+
+```{r}
+
+#file_sel:
+data_gc_export %>% filter(date == "2023-10-06") %>% select(date, L_R:Laenge_max_Power_Phase_Links, everything())
+```
+
+```{r}
+data_plot <- data_ride %>% filter(LRBALANCE >30 &
+                       LRBALANCE <70)
+
+data_plot %>% summarise(data_ride_list_raw,
+                        data_ride_list_raw) #%>% pull()
+data_plot  %>% summary()
+```
+
+
+```{r}
+data_plot <- data_ride %>% filter(LRBALANCE >30 &
+                       LRBALANCE <70)
+
+LRBALANCE_median <- data_plot %>% summarise(LRBALANCE = median(LRBALANCE,na.rm = TRUE)) %>% pull()
+
+data_ride %>% filter(LRBALANCE >30 &
+                       LRBALANCE <70) %>%
+  ggplot()+
+  geom_histogram(aes(LRBALANCE),binwidth = 1, alpha =1/2)+
+  geom_histogram(data = data_ride2 %>% filter(LRBALANCE >30 &
+                                              LRBALANCE <70),
+                 aes(LRBALANCE, fill= "old"), binwidth = 1, alpha =1/2)+
+  geom_vline(xintercept = LRBALANCE_median, linetype = 2)+
+  theme_light()
+```
+
+```{r}
+data_plot <- data_ride %>% filter(LRBALANCE >30 &
+                       LRBALANCE <70)
+
+LTE_median <- data_plot %>% summarise(LTE = median(LTE,na.rm = TRUE)) %>% pull()
+RTE_median <- data_plot %>% summarise(RTE = median(RTE,na.rm = TRUE)) %>% pull()
+
+data_plot %>% 
+  ggplot()+
+  geom_histogram(aes(LTE, fill = "left"), binwidth = 1, alpha = 1/2)+
+  geom_histogram(aes(RTE, fill = "right"), binwidth = 1, alpha = 1/2)+
+  geom_vline(aes(xintercept = LTE_median,color = "left"), linetype = 2, size = 1)+
+  geom_vline(aes(xintercept = RTE_median,color = "right"), linetype = 2, size = 1)+
+  labs(x = "Drehmomen Eff.")+
+  theme_light()
+```
+
+
+```{r}
+data_plot2 <- data_ride2 %>% filter(LRBALANCE >30 &
+                       LRBALANCE <70)
+
+LTE_median2 <- data_plot2 %>% summarise(LTE = median(LTE,na.rm = TRUE)) %>% pull()
+RTE_median2 <- data_plot2 %>% summarise(RTE = median(RTE,na.rm = TRUE)) %>% pull()
+
+data_plot2 %>% 
+  ggplot()+
+  geom_histogram(aes(LTE, fill = "left"), binwidth = 1, alpha = 1/2)+
+  geom_histogram(aes(RTE, fill = "right"), binwidth = 1, alpha = 1/2)+
+  geom_vline(aes(xintercept = LTE_median2,color = "left"), linetype = 2, size = 1)+
+  geom_vline(aes(xintercept = RTE_median2,color = "right"), linetype = 2, size = 1)+
+  labs(x = "Drehmomen Eff.")+
+  theme_light()
+```
+
+```{r}
+data_plot %>% #colnames()
+  ggplot()+
+  geom_point(aes(x= RPS, y= RTE, color = "Right"), alpha = 1/10)+
+  geom_point(aes(x= LPS, y= LTE, color = "LEFT"), alpha = 1/10)+
+  coord_cartesian(xlim = c(0,30),
+                  ylim = c(0,100))+
+  labs( x = "Gleichmaessigkeit_des_Tretens",
+        y = "Drehmoment_Effektivitaet")+
+  theme_light()
+```
+
+```{r}
+data_plot %>% #colnames()
+  ggplot()+
+  geom_histogram(aes( LRBALANCE), binwidth = 1)+
+  theme_light()
+```
+
+
+```{r}
+data_plot %>% colnames()
+  ggplot()+
+  geom_point(aes(x= LTE, y= RTE), alpha = 1/10)+
+  geom_point(data = data_plot2, 
+             aes(x= LTE, y= RTE, color = "old"), alpha = 1/10)+
+  coord_cartesian(xlim = c(40,100),
+                  ylim = c(40,100))+
+  theme_light()
+```
+
+```{r}
+data_plot <- data_ride %>% filter(LRBALANCE >30 &
+                       LRBALANCE <70)
+
+LPS_median <- data_plot %>% summarise(LPS = median(LPS,na.rm = TRUE)) %>% pull()
+RPS_median <- data_plot %>% summarise(RPS = median(RPS,na.rm = TRUE)) %>% pull()
+
+data_plot %>% 
+  ggplot()+
+  geom_histogram(aes(LPS, fill = "left"), binwidth = 1, alpha = 1/2)+
+  geom_histogram(aes(RPS, fill = "right"), binwidth = 1, alpha = 1/2)+
+  geom_vline(aes(xintercept = LPS_median,color = "left"), linetype = 2, size = 1)+
+  geom_vline(aes(xintercept = RPS_median,color = "right"), linetype = 2, size = 1)+
+  labs(x = "Drehmomen Eff.")+
+  theme_light()
+```
+
+
+```{r}
+"C:/Users/rigle/Documents/Training/Wahoo Element/2023-10-14-083339-ELEMNT BOLT 7CED-1013-0.fit"
+```
+
+https://msmith.de/FITfileR/articles/FITfileR.html#example-use-cases
+```{r}
+remotes::install_github("grimbough/FITfileR")
+library(FITfileR)
+```
+
+1

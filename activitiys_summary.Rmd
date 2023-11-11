@@ -1,0 +1,27 @@
+---
+title: "Activity Summaries"
+author: "ari"
+date: '2023-03-19'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+
+source("functions_import.R")
+```
+
+```{r}
+data_gc <-  read_csv(path_activities)
+
+data_gc <- prepare_gc_summary(data_gc)
+```
+
+```{r}
+data_gc
+```
+

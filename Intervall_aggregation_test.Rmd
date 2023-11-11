@@ -1,0 +1,310 @@
+---
+title: "Intervall_aggregation_test"
+author: "ari"
+date: '2022-11-11'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+library("jsonlite")
+
+
+#custom funcitons
+source("functions_ftp_laktat.R")
+source("functions_import.R")
+
+source("functions_intervall.R")
+
+```
+
+
+```{r}
+
+pfad_aktivity <- "C:/Users/rigle/AppData/Local/GoldenCheetah/Andl/activities/" 
+
+```
+
+```{r}
+
+choose_files(pfad_aktivity, "2020-04-24","2020-04-26") 
+
+```
+
+
+
+
+
+
+
+###  Import Intervals
+```{r}
+path_laktat <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+file_name_intervals_result <- "Results/intervals_result.rds"
+
+intervals_result_raw <- read_rds(str_c(path_laktat, file_name_intervals_result))
+```
+
+```{r}
+intervals_result_raw %>% filter(interval_watt > 240) %>% group_by(year(date)) %>%
+  count()
+```
+
+
+
+
+```{r}
+intervals_result <- intervals_result_raw %>%
+  
+  mutate(year= as.factor(year(date)),
+       interval_min = interval_sec/60) %>%
+  
+  
+  filter(interval_min >= 1  )%>% group_by(date, workout_code) %>% 
+  mutate(interval_mean_w = mean(interval_watt),
+         interval_median_w = median(interval_watt)) %>% #ungroup() %>%
+  mutate(interval = case_when(interval_watt > interval_mean_w*1.2 ~ TRUE, TRUE ~ FALSE),
+         interval_med = case_when(interval_watt > interval_median_w*1.2 ~ TRUE, TRUE ~ FALSE)) %>%
+    ungroup()
+
+intervals_result
+```
+
+```{r}
+intervals_result %>% #group_by(date, workout_code) %>% summarise(interval = sum(interval)) %>%
+  #filter(interval == 0) %>% 
+  #filter(str_detect(workout_code, fixed("SST ", ignore_case = TRUE))) 
+filter(date == "2020-04-24")
+```
+
+Interval_Watt sind falsch!
+
+
+
+
+
+```{r}
+file_sel <- choose_files(pfad_aktivity, "2020-04-24", "2020-04-24")
+
+data_ride <- read_gc_data(pfad_aktivity, file_sel)
+
+ridedata <- get_activity_data(data_ride)
+
+intervals <- get_activity_intervals(data_ride)
+intervals %>% mutate(min = interval_start/60)
+
+seq(min(ridedata$SECS),
+                                                   max(ridedata$SECS), 
+                                                   by= 1)
+```
+
+
+
+
+
+
+
+```{r}
+
+file_sel <- choose_files(pfad_aktivity, "2021-10-11","2021-10-11") 
+intervals <- read_intervals(pfad_aktivity, file_sel)
+intervals
+#add_activity_info(intervals, data_ride, file_sel)
+```
+
+
+
+```{r}
+
+execute_loop = TRUE
+
+result_old <- read_csv2("Results/intervall_aggregation.csv")
+max_date <- result_old %>% summarise(max(date)) %>% pull() + 1 
+
+if(execute_loop == TRUE){
+    files_sel <- choose_files(pfad_aktivity, max_date,Sys.Date()) 
+    
+    result_list <- list()
+    for (i in seq_along(files_sel$file_name)) {
+      
+      file_sel <- files_sel[i,]
+      result_list[[i]] <- read_intervals(pfad_aktivity, file_sel)
+      
+    
+    
+    
+    }
+    
+    result <- bind_rows(result_list)
+}
+
+
+
+result_new <- result_old %>% bind_rows(result) %>% arrange(desc(date))
+result_new %>% write_csv2("Results/intervall_aggregation.csv")
+
+result<- result_new
+
+```
+
+
+```{r}
+data_ride <- read_gc_data(pfad_aktivity, file_sel)
+
+ridedata <- get_activity_data(data_ride)
+
+str_detect(ridedata %>% colnames() , "HR") %>% sum()
+```
+
+```{r}
+result%>% 
+  ggplot(aes(x =date))+ geom_point(aes(y=watt, size = secs))
+```
+
+### SST
+```{r}
+result_sst <- result %>% filter(str_detect(workout_code, "SST") &
+                                     secs > 1*60) %>% group_by(file_name) %>%
+  mutate(watt_mean = mean(watt),
+         watt_mean = case_when(watt_mean > 190 ~ 190, TRUE ~watt_mean),
+         interval = case_when((watt > watt_mean*1.15)  ~ TRUE, TRUE ~ FALSE)) 
+
+result_sst %>%
+  ggplot(aes(x =date))+ geom_point(aes(y=watt, size = secs, color = interval))
+
+```
+
+```{r}
+result_sst %>% ungroup() %>%filter(date > "2016-01-15" &
+                                          date < "2023-01-01" &
+                                     device != "Ergometer ") %>% 
+  #filter(interval == FALSE & watt >230) %>% select(date:hr,watt_mean)
+  filter(interval == TRUE) %>%
+  ggplot(aes(x =date))+ geom_point(aes(y=watt, size = secs, color = interval))
+```
+
+```{r}
+result_sst %>% ungroup() %>% mutate(year = lubridate::year(date)) %>%
+                    filter(year %in% c(2017,2020,2021,2022) &
+                                     device != "Ergometer ") %>% 
+  filter(interval == TRUE) %>%
+  ggplot(aes(x =date))+ 
+  geom_point(aes(y=watt, size = secs, color = interval))+
+  geom_smooth(aes(y=watt))+
+  geom_hline(yintercept = c(230, 250,260), linetype = 2)+
+  facet_wrap(year~., scales = "free_x", ncol = 1) +
+  theme_light()
+```
+
+### vo2max
+```{r}
+result_vo2 <- result %>% filter(str_detect(workout_code, "Vo2max") ) %>% group_by(file_name) %>%
+  mutate(watt_mean = mean(watt),
+         watt_mean = case_when(watt_mean > 190 ~ 190, TRUE ~watt_mean),
+         interval = case_when((watt > watt_mean*1.15)  ~ TRUE, TRUE ~ FALSE)) 
+
+result_vo2 %>%
+  ggplot(aes(x =date))+ geom_point(aes(y=watt, size = secs, color = interval))
+
+```
+
+### FTP
+```{r}
+result_ftp <- result %>% filter(str_detect(workout_code, "FTP") ) %>% group_by(file_name) %>%
+  mutate(watt_mean = mean(watt),
+         watt_mean = case_when(watt_mean > 190 ~ 190, TRUE ~watt_mean),
+         interval = case_when((watt > watt_mean*1.15)  ~ TRUE, TRUE ~ FALSE)) 
+
+result_ftp %>%
+  ggplot(aes(x =date))+ geom_point(aes(y=watt, size = secs, color = interval))
+
+```
+
+## Allgemeiner Ansatz
+```{r}
+watt_device <- function(df, device_list = c("BAsso_Vector", "P2M", "P2Cros", "P2MIndoor")){
+  df <- df %>% mutate(watt_device = case_when(device %in% device_list ~ TRUE, TRUE ~FALSE))
+  return(df)
+}
+```
+
+
+```{r}
+result_interval <- watt_device(result ) %>% filter(watt > 220 &
+                                                   watt_device == TRUE)%>% 
+                    mutate(year = lubridate::year(date),
+                           watt_secs = watt*secs) %>%
+                    filter(year %in% c(2017,2021,2022) ) %>% 
+                      group_by(year,date) %>% 
+                          summarise(secs_sum = sum(secs),
+                                    watt_mean = sum(watt_secs)/secs_sum) %>%
+                            mutate(min = secs_sum/60,
+                                   duration = case_when(min < 30~ "< 30",
+                                                        min < 55 ~ "< 60",
+                                                        min < 85 ~ "< 90",
+                                                        TRUE ~ ">= 90")) 
+
+
+result_interval %>%
+  ggplot(aes(x =date))+ 
+  geom_point(aes(y=watt_mean, size = min, color =duration))+
+  geom_smooth(aes(y=watt_mean))+
+  geom_hline(yintercept = c(230, 250,260), linetype = 2)+
+  facet_wrap(year~., scales = "free_x", ncol = 1) +
+  coord_cartesian(ylim = c(200,350))+
+  theme_light()
+```
+
+```{r}
+result_interval %>% 
+  filter(watt_mean < 370) %>% 
+  ggplot(aes(x =min))+
+  geom_point(aes(y=watt_mean, color = as.factor(year)))+
+  
+  geom_smooth(aes(y=watt_mean, color = as.factor(year)))
+```
+
+```{r}
+
+
+result %>% count(device)
+  filter(date == "2017-03-17")%>% filter(watt > 220 #&
+                    #str_detect(device, c("Basso_Vector", "P2"))
+                    )%>% mutate(year = lubridate::year(date),
+                                test = str_detect(device, c("Basso_Vector","P2"))) %>% select(watt, device,test)
+
+
+
+watt_device(result ) %>%  filter(date == "2017-03-17")%>% filter(watt > 220 #&
+                    #str_detect(device, c("Basso_Vector", "P2"))
+                    )%>% select(watt, device, watt_device)
+```
+
+
+```{r}
+result_sst %>% ggplot(aes(watt))+ geom_histogram(binwidth = 5)
+```
+
+
+```{r}
+file_sel_debug <- choose_files(files, "2022-01-03","2022-01-03") 
+#file_sel_debug <- file_sel
+
+data_ride_debug <- read_gc_data(pfad_aktivity, file_sel_debug)
+
+ridedata_debug <- get_activity_data(data_ride_debug)
+
+is.null(data_ride_debug[[1]]$RIDE$INTERVALS)
+```
+
+
+
+
+
+

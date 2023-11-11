@@ -1,0 +1,225 @@
+---
+title: "Analyze Intervalls"
+author: "ari"
+date: '2022-09-16'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Intervalls are generated in Import Data_test
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(patchwork)
+
+source("functions_ftp_laktat.R")
+```
+## Import Intervals
+```{r}
+path_laktat_ftp <- "C:/Users/rigle/Documents/Training/Laktat FTP/"
+file_name_intervals_result <- "Results/intervals_result.rds"
+
+intervals_result <- read_rds(str_c(path_laktat_ftp, file_name_intervals_result))
+```
+
+## Import FTP data
+
+```{r}
+ftp_data_raw <- read_csv2(str_c(path_laktat_ftp,"FTP.csv"))
+
+ftp_data <- ftp_data_raw %>% mutate(date = as.Date(datum, "%d.%m.%Y")) %>% select(-datum) %>% arrange(date)%>% mutate(date_max = lead(date) - 1,
+                    date_min = date,
+                    date_max = if_else(is.na(date_max),Sys.Date(),date_max))
+
+i=1
+
+ftp_date_data <- list()
+for(i in seq_along(ftp_data$date)){
+    date_ftp <-tibble(date = seq(ftp_data[i,]$date_min,ftp_data[i,]$date_max, by ="day"))
+    date_ftp$ftp <- ftp_data[i,]$ftp
+    ftp_date_data[[i]] <- date_ftp
+  }
+date_ftp <- bind_rows(ftp_date_data)
+date_ftp
+```
+
+## Import Laktat data
+
+import the calculated 2mmol and 4mmol threshold.
+calculated with Lactate_Curve_FTP.rmd
+
+```{r}
+laktat_watt_raw <- read_csv2(str_c(path_laktat_ftp,"laktat_watt.csv"))
+
+laktat_watt <- laktat_watt_raw %>% mutate(date = as.Date(date, "%d.%m.%Y")) %>% 
+                      arrange(date)%>% 
+              mutate(date_max = lead(date) - 1,
+                    date_min = date,
+                    date_max = if_else(is.na(date_max),Sys.Date(),date_max))
+
+
+
+laktat_watt_date_data <- list()
+for(i in seq_along(laktat_watt$date)){
+    laktat_watt_date <-tibble(date = seq(laktat_watt[i,]$date_min,
+                                         laktat_watt[i,]$date_max, by ="day"))
+    laktat_watt_date$w_2mmol <- laktat_watt[i,]$w_2mmol
+    laktat_watt_date$w_4mmol <- laktat_watt[i,]$w_4mmol
+    laktat_watt_date$w_5mmol <- laktat_watt[i,]$w_5mmol
+    laktat_watt_date_data[[i]] <- laktat_watt_date
+  }
+laktat_watt_date <- bind_rows(laktat_watt_date_data)
+laktat_watt_date
+```
+
+```{r}
+date_ftp_latkat <- date_ftp %>% full_join(laktat_watt_date, by = "date")   
+
+date_ftp_latkat %>% filter(!is.na(w_5mmol) & !is.na(ftp)) %>% 
+                          mutate(diff = ftp - w_5mmol,
+                                 year = year(date))%>% count(diff, year)
+```
+
+```{r}
+date_ftp_latkat <- date_ftp_latkat  %>% mutate(ftp_mmol = case_when(!is.na(w_5mmol) ~ w_5mmol, TRUE ~ ftp))
+```
+
+```{r}
+intervals_result <- intervals_result %>% left_join(date_ftp_latkat, by = "date") 
+```
+
+```{r}
+intervals_result_cat <- intervals_result %>% filter(!is.na(ftp_mmol)) %>% 
+                            #select(date, interval_name, interval_watt, ftp_mmol, everything()) %>%
+  mutate(intensity = interval_watt / ftp_mmol,
+         training = case_when(interval_watt < 180 ~ "GA1",
+                              intensity > 0.85 & intensity < 0.95 ~ "SST",
+                              intensity >= 0.95 & intensity < 1.05 ~ "FTP",
+                              intensity >=1.05 ~ "VO2max", 
+                               TRUE ~ "Tempo"),
+         training_pol = case_when(interval_watt < 170 ~ "GA1",
+                              intensity > 0.85 ~ "SST - VO2max", 
+                               TRUE ~ "Tempo")) 
+
+
+
+intervals_result_cat %>%
+  ggplot(aes(intensity, fill = training))+ 
+  geom_histogram(binwidth = 0.05, position = "dodge")
+```
+
+```{r}
+intervals_result_cat %>% mutate(week = isoweek(date),
+                            year = year(date)) %>%
+  group_by(year, week, training) %>% 
+  summarise(seconds = sum(interval_sec),
+            date = min(date,na.rm = TRUE)) %>%
+  #filter(date > "2022-01-01")
+  
+  mutate( hours = seconds /3600) %>%
+  ggplot(aes(x = date))+
+  geom_point(aes(y = hours, color = training))+
+  geom_smooth(aes(y = hours, color = training))+
+  facet_wrap(training ~., ncol = 1, scales = "free_y")+
+  geom_vline(xintercept = as.Date("2017-06-04"))
+
+
+```
+
+
+```{r}
+intervals_agg_pol <- intervals_result_cat %>% mutate(week = isoweek(date),
+                            year = year(date)) %>%
+  group_by(year, week, training_pol) %>% 
+  summarise(seconds = sum(interval_sec),
+            date = min(date,na.rm = TRUE)) %>%
+  #filter(date > "2022-01-01")
+    mutate( hours = seconds /3600) 
+
+
+
+
+intervals_agg_pol %>%
+  ggplot(aes(x = date))+ 
+  geom_point(aes(y = hours, color = training_pol))+
+  geom_smooth(aes(y = hours, color = training_pol))+
+  facet_wrap(training_pol ~., ncol = 1, scales = "free_y")+
+  geom_vline(xintercept = as.Date("2017-06-04"))
+```
+
+
+
+```{r}
+intervals_result_cat %>%
+  ggplot(aes(x = date))+ 
+#  geom_point(aes(y = ftp_mmol))+
+  geom_jitter(aes(y = ftp, col ="ftp"),alpha = 1/10)+
+  geom_jitter(aes(y = w_5mmol, col ="w_5mmol"),alpha = 1/10)
+```
+
+
+```{r}
+intervals_result_cat %>% filter(date > "2020-08-01" &
+                                  date < "2021-12-01") %>%
+  ggplot(aes(x = date))+ 
+#  geom_point(aes(y = ftp_mmol))+
+  geom_point(aes(y = ftp, col ="ftp"),alpha = 1/10)+
+  geom_point(aes(y = w_5mmol, col ="w_5mmol"),alpha = 1/10)
+```
+
+Vergleich der werte w_5mmol und ftp mit ergebnis der funktion
+
+```{r}
+
+
+select_ftp_mmol(intervals_result_cat) %>%  #filter(date > "2021-10-01") %>%
+  ggplot(aes(x = date))+ 
+  geom_step(aes(y = ftp_mmol, color = "result"))+
+  geom_point(aes(y = ftp, col ="ftp"),alpha = 1)+
+  geom_point(aes(y = w_5mmol, col ="w_5mmol"),alpha = 1)+
+  labs(title = "test the select_ftp_mmol function",
+       y = "W")+
+  theme_light()
+```
+
+
+```{r}
+intervals_result_cat %>% #filter(date > "2020-09-10" &
+                          #        date < "2022-12-01") %>% 
+                          group_by(date ) %>% 
+                                          summarise(ftp = first(ftp),
+                                                    w_5mmol = first(w_5mmol)) %>%
+  arrange(date) %>%
+                          mutate(ftp_diff = as.numeric(ftp !=lag(ftp, default = 2)),
+                                 ftp_test = cumsum(ftp_diff)) %>% group_by(ftp_test) %>%
+                          mutate(ftp_days = rank(date)) %>%
+  
+                            mutate(w_5_diff = as.numeric(w_5mmol !=lag(w_5mmol, default = 2)),
+                              w_5_test = cumsum(w_5_diff)) %>% group_by(w_5_test) %>%
+                          mutate(w_5_days = rank(date)) %>%
+  mutate(ftp_mmol = case_when(ftp_days < w_5_days ~ ftp, TRUE ~ w_5mmol))%>%
+  ggplot(aes(x = date))+ 
+  geom_step(aes(y = ftp_mmol))+
+  geom_point(aes(y = ftp, col ="ftp"),alpha = 1/10)+
+  geom_point(aes(y = w_5mmol, col ="w_5mmol"),alpha = 1/10)
+```
+
+
+```{r}
+intervals_agg_pol %>% select(year, week, date,training_pol, hours) %>% 
+                        mutate(hours = round(hours,1)) %>%
+                              pivot_wider(names_from = training_pol, values_from = hours, values_fill = 0)  %>%
+    mutate(total = GA1 + Tempo + `SST - VO2max`,
+           intensity_rel = `SST - VO2max` / total) #%>%  
+  ggplot(aes(x = date))+
+  geom_point(aes(y = intensity_rel),width = 4)#+
+  geom_smooth(aes(y = hours, color = training_pol))+
+  facet_wrap(training_pol ~., ncol = 1, scales = "free_y")+
+  geom_vline(xintercept = as.Date("2017-06-04"))
+
+```
+

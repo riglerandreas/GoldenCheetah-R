@@ -1,0 +1,171 @@
+---
+title: "Compare powermeter"
+author: "ari"
+date: '2023-04-15'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(patchwork)
+
+source("functions_ftp_laktat.R")
+source("functions_import.R")
+source("functions_sesons.R")
+source("functions_intervall.R")
+```
+
+```{r}
+
+intensity_min <- 0.88 #minimum intensity to count as an Interval intensity = watt_interval_mean/watt_ftp
+device_list = c("BAsso_Vector", "P2M", "P2Cros", "P2MIndoor") # List of trust able devices for interval aggregation
+
+path_ftp_tests <- "C:/Users/rigle/Documents/Training/Laktat FTP/laktat_watt_ftp.csv"
+path_intervalls <- "Results/intervall_aggregation.csv"
+path_activities <- "Results/goldencheetah_tss.csv"
+path_activities_raw <- "C:/Users/rigle/AppData/Local/GoldenCheetah/Andl/activities/"
+```
+
+
+
+
+
+
+```{r}
+tibble(files = list.files(path_activities_raw)) %>% arrange(desc(files))
+
+file_garmin = "2023_08_07_17_09_45.json"#"2023_04_16_16_25_41.json"
+file_p2max = "2023_08_07_17_08_20.json"#"2023_04_15_11_29_13.json"
+```
+
+
+```{r}
+data_garmin <- read_gc_data(path_activities_raw, file_garmin)
+data_p2max <- read_gc_data(path_activities_raw, file_p2max)
+```
+
+```{r}
+data_garmin <- get_activity_data(data_garmin)
+
+data_garmin #%>% 
+  #write_csv2("Results/power_meter_comparison/2023_08_07_vektor2_data.csv")
+data_p2max <- get_activity_data(data_p2max)
+#data_p2max %>% write_csv2("Results/power_meter_comparison/2023_08_07_p2max_data.csv")
+```
+
+```{r}
+path_results <- "Results/power_meter_comparison/" 
+list.files(path_results)
+```
+
+
+```{r}
+
+file_garmin <- "2023_08_07_vektor2_data.csv"
+file_p2max <- "2023_08_07_p2max_data.csv"
+
+data_garmin <- read_csv2(str_c(path_results, file_garmin))
+data_p2max <- read_csv2(str_c(path_results, file_p2max))
+```
+
+
+```{r}
+data_garmin %>% 
+  ggplot(aes(x= SECS)) + 
+  geom_line(aes(y= WATTS, color = "garmin")) +
+  geom_line(data = data_p2max,aes(y= WATTS, color = "p2max"))
+```
+
+```{r}
+secs_min = 1500
+secs_max = 2000
+
+data_garmin %>% mutate(SECS = SECS+18 ,
+                        WATTS = WATTS -8) %>% filter( SECS > secs_min &
+                          SECS < secs_max) %>%
+  ggplot(aes(x= SECS)) + 
+  geom_line(aes(y= WATTS, color = "garmin")) +
+  geom_line(data = data_p2max%>% filter( SECS > secs_min &
+                          SECS < secs_max),aes(y= WATTS, color = "p2max"))
+```
+
+```{r}
+
+data_garmin %>% mutate(SECS = SECS+18) %>%
+  ggplot(aes(x= SECS)) + 
+  geom_line(aes(y= HR, color = "garmin")) +
+  geom_line(data = data_p2max,aes(y= HR, color = "p2max"))+
+  coord_cartesian(, ylim = c(90,130))
+```
+
+```{r}
+
+data_garmin %>% mutate(SECS = SECS+18) %>%
+  ggplot(aes(x= SECS)) + 
+  geom_line(aes(y= HR, color = "garmin")) +
+  geom_line(data = data_p2max,aes(y= HR, color = "p2max"))+
+  coord_cartesian(xlim = c(2075,2450), ylim = c(125,170))
+```
+
+
+```{r}
+data_p2max_garmin <- data_garmin %>% mutate(SECS = SECS+18) %>% 
+                                      left_join(data_p2max, 
+                                                by = "SECS", 
+                                                suffix = c("_garmin", "_p2max")) %>%
+                                            filter(!is.na(WATTS_p2max))
+```
+
+```{r}
+data_p2max_garmin #%>% write_csv2("Results/power_meter_comparison/2023_08_07_powermeter_p2max_vs_garmin.csv")
+```
+
+
+```{r}
+data_p2max_garmin %>% mutate(watt_diff = WATTS_garmin - WATTS_p2max,
+                             p2max_bin = cut(WATTS_p2max, breaks=seq(100,300,25))) %>% group_by(p2max_bin) %>%
+  mutate(watt_diff_median = median(watt_diff)) %>%
+  ggplot(aes(x = WATTS_p2max)) +
+  geom_point(aes(y = watt_diff, alpha = 1/3))+
+  geom_point(aes(y = watt_diff_median, color = "median"), size =1)+
+  coord_cartesian(ylim = c(-10,50))
+
+
+```
+
+```{r}
+data_p2max_garmin %>% mutate(watt_diff = WATTS_garmin - WATTS_p2max,
+                             p2max_bin = cut(WATTS_p2max, breaks=seq(100,200,10))) %>% group_by(p2max_bin) %>%
+  summarise(watt_diff_median = median(watt_diff))
+```
+
+
+```{r}
+data_p2max_garmin %>% mutate(watt_diff = WATTS_garmin - WATTS_p2max,
+                             p2max_bin = cut(WATTS_p2max, breaks=seq(100,300,25))) %>% group_by(p2max_bin) %>%
+  mutate(watt_diff_median = median(watt_diff)) %>%
+  ggplot(aes(x = WATTS_p2max)) +
+  geom_abline(slope = 1, color = "red", linetype = 2)+
+  geom_point(aes(y = WATTS_garmin, alpha = 1/3), alpha = 1/5)+
+  theme_light()
+```
+
+```{r}
+
+data_p2max_garmin_uhr <- read_csv2("Results/power_meter_comparison/2023_04_16_powermeter_p2max_crosser_vs_garmin_uhr_kalib.csv")  %>% 
+                                                  mutate(kalib = "uhr")
+data_p2max_garmin_element <- read_csv2("Results/power_meter_comparison/2023_04_16_powermeter_p2max_crosser_vs_garmin_element_kalib.csv") %>% mutate(kalib = "element")
+
+
+data_p2max_garmin_uhr %>% bind_rows(data_p2max_garmin_element) %>%
+  ggplot(aes(x = WATTS_p2max)) +
+  geom_abline(slope = 1, color = "red", linetype = 2)+
+  geom_point(aes(y = WATTS_garmin, color = kalib), alpha = 1/2)+
+  theme_light()
+
+```
+
