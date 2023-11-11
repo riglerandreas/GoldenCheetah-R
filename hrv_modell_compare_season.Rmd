@@ -33,6 +33,8 @@ data_2019_raw<- read_rds( "Results/test_ml_data_2019.rds")
 data_2020_raw<- read_rds( "Results/test_ml_data_2020.rds")
 
 data_2021_raw<- read_rds( "Results/test_ml_data_2021.rds")
+data_2022_raw<- read_rds( "Results/test_ml_data_2022.rds")
+data_2023_raw<- read_rds( "Results/test_ml_data_2023.rds")
 
 ```
 
@@ -115,10 +117,12 @@ data_model_2018 <- data_to_minute(data_2018_raw) %>% data_features()
 data_model_2019 <- data_to_minute(data_2019_raw) %>% data_features()
 data_model_2020 <- data_to_minute(data_2020_raw) %>% data_features()
 data_model_2021 <- data_to_minute(data_2021_raw) %>% data_features()
+data_model_2022 <- data_to_minute(data_2022_raw) %>% data_features()
+data_model_2023 <- data_to_minute(data_2023_raw) %>% data_features()
 
 data_model_all <- data_model_2016 %>% bind_rows(data_model_2017) %>% bind_rows(data_model_2018)%>%
                                       bind_rows(data_model_2019) %>% 
-                                      bind_rows(data_model_2020) %>% bind_rows(data_model_2021)
+                                      bind_rows(data_model_2020) %>% bind_rows(data_model_2021)%>% bind_rows(data_model_2022)%>% bind_rows(data_model_2023)
 
 ```
 
@@ -346,6 +350,7 @@ result_all %>% mutate(pred_error = hr- hr_pred_rf) %>%
   
   ggplot(aes(x=date))+
   geom_point(aes(y = pred_error, color = workout))+
-  geom_line(aes(y = pred_error, color = workout))
+  #geom_line(aes(y = pred_error, color = workout))+
+  geom_smooth(aes(y = pred_error, color = workout))
 ```
 

@@ -1,0 +1,316 @@
+---
+title: "hrv_modell_indoor"
+author: "ari"
+date: "20 11 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The result in the notebook hrv_modell_indoor_v2.Rmd was, that the XGB Regressor was the best model (data 2017 indoor) to predict the hr from the watt.
+
+Goal is to create a new benchmark model based on xgb
+
+Tasks:
+- find a good metric (RMSE?)
+- check for overfitting (e.g. no jumps in predicted hr)
+- use as trainingsdata all indoor data
+- use as trainingsdata all data (global model)
+- try conformal prediction!
+
+At the end there should be am model which is able to predict the hr.
+Based on the fitnesslevel the model should make a prediction which:
+- is lower than hr -> higher fitnesslevel
+- is higher than hr -> lower fitnesslevel
+
+
+
+## Verbesserungsvorschläge (from the old notebook):
+- watt_3m wichtigster wert, vielleicht wichtig typische intervallängen abzubilden? (3min 5min 10min 20min 40min 50min)
+- vielleicht rohdaten feiner gestallten - 30sekunden mittlwerte?
+- aber vielleicht auch nur auf 1-2 monate konzentrieren --> kommende monate predicten (siehe ganz unten)
+
+- watt_m3 und watt_m4 sind die wichtigsten features, deutlich wichtiger als watt_m2 und watt_m5
+- derzeit im trainingssett nur 40 einheiten (man sieht deutliches overfitting). Vielleicht doch auf mehrere jahre ausdehnen und dann positive / negative abweichung bewerten. Leidet dann die Qualität darunter?
+
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(GGally)
+library(zoo) #rollmean
+library(vip) #feature importance
+
+
+source("functions_hrv_model.R")
+```
+
+# Data
+## load all 
+
+data from hrv_model_data.Rmd
+
+```{r}
+data_2016_raw<- read_rds( "Results/test_ml_data_2016.rds")
+
+data_2017_raw<- read_rds( "Results/test_ml_data_2017.rds")
+
+data_2018_raw<- read_rds( "Results/test_ml_data_2018.rds")
+
+data_2019_raw<- read_rds( "Results/test_ml_data_2019.rds")
+
+data_2020_raw<- read_rds( "Results/test_ml_data_2020.rds")
+
+data_2021_raw<- read_rds( "Results/test_ml_data_2021.rds")
+data_2022_raw<- read_rds( "Results/test_ml_data_2022.rds")
+data_2023_raw<- read_rds( "Results/test_ml_data_2023.rds")
+
+```
+
+## prepare data for ml
+
+```{r}
+data_model_2016 <- data_to_minute(data_2016_raw) %>% data_features()
+data_model_2017 <- data_to_minute(data_2017_raw) %>% data_features()
+data_model_2018 <- data_to_minute(data_2018_raw) %>% data_features()
+data_model_2019 <- data_to_minute(data_2019_raw) %>% data_features()
+data_model_2020 <- data_to_minute(data_2020_raw) %>% data_features()
+data_model_2021 <- data_to_minute(data_2021_raw) %>% data_features()
+data_model_2022 <- data_to_minute(data_2022_raw) %>% data_features()
+data_model_2023 <- data_to_minute(data_2023_raw) %>% data_features()
+
+data_model_all <- data_model_2016 %>% bind_rows(data_model_2017) %>% bind_rows(data_model_2018)%>%
+                                      bind_rows(data_model_2019) %>% 
+                                      bind_rows(data_model_2020) %>% bind_rows(data_model_2021)%>% bind_rows(data_model_2022)%>% bind_rows(data_model_2023)
+```
+
+
+
+
+
+```{r}
+data_model_all %>% filter(file_name == "2017_01_05_11_06_01.json" & minute <25) %>%
+#count(file_name)
+  
+  ggplot(aes(x=minute))+
+  geom_point(aes(y=watt, color = "watt"))+
+  geom_line(aes(y=watt, color = "watt"))+
+  geom_point(aes(y=watt_m5, color = "watt_m5"))+
+  geom_point(aes(y=watt_m3, color = "watt_3"))+
+geom_line(aes(y=watt_m5, color = "watt_m5"))+
+  geom_line(aes(y=watt_m3, color = "watt_3"))+
+  geom_point(aes(y=watt_m10, color = "watt_10"))+
+  geom_line(aes(y=watt_m10, color = "watt_10"))+
+  geom_line(aes(y=watt_mean, color = "watt_mean"))+
+  labs(title = " example of features for one activity")+
+  theme_light()
+```
+
+```{r}
+data_activity_count <- data_model_all %>% distinct(file_name, device, date) %>%
+  mutate(year = year(date)) %>%
+  count(year,device) 
+activities <- data_activity_count %>% summarise(sum(n)) %>% pull()
+
+data_activity_count%>%
+  ggplot(aes(x = year))+
+  geom_line(aes(y=n, color = device))+
+  labs(title = str_c(activities, " activtities"))+
+  theme_light()
+```
+
+
+# Model
+
+## Trainings Test split
+```{r}
+
+files_all <- data_model_all %>% ungroup() %>%distinct(file_name) %>% select(file_name)
+
+set.seed(1353)
+files_split <- initial_split(files_all)
+
+
+train_files <- training(files_split)
+test_files <- testing(files_split)
+
+train_data <- train_files %>% left_join(data_model_all,by = "file_name")
+test_data <- test_files %>% left_join(data_model_all,by = "file_name")
+
+#für final model:
+data_model_split <- initial_split(data_model_all)
+
+
+```
+
+
+
+
+### xgb from 2017 cross validataion
+from hrv_modell_indoor_v2.Rmd 
+
+```{r}
+train_data2 <- train_data
+
+# workflow from hrv_modell_indoor_v2.Rmd 
+final_workflow_xgb <- read_rds("Results/workflow_xgb.rds")
+final_xgb2 <- fit(final_workflow_xgb, train_data2 )
+
+#final_xgb2 %>% write_rds("Results/final_fit_xgb.rds")
+```
+
+```{r}
+final_xgb2 %>% extract_fit_parsnip() %>%
+  vip(geom = "point")
+```
+
+```{r}
+result_final_xgb2 <- data_model_all %>%
+                  bind_cols(
+                    predict(final_xgb2, new_data = data_model_all) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+
+
+
+```{r}
+
+rmse_files_xgb <- result_final_xgb2 %>% group_by(date,file_name) %>% rmse( hr,hr_pred) %>% arrange(desc(.estimate))
+
+rmse_files_xgb %>% 
+  ggplot()+
+  geom_histogram(aes(.estimate, fill = "XGB"), binwidth =0.5, alpha =1/2)+
+  labs(x = "RMSE")+
+  theme_light()
+```
+
+
+
+
+```{r}
+
+
+files_test <- rmse_files_xgb$file_name[1:3]
+
+result_final_xgb2 %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+  #          aes(y=hr_pred, color ="prediction old"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ date)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+```{r}
+
+files_test <- c("2017_02_13_19_13_13.json", "2017_03_15_19_06_28.json", "2017_01_02_15_20_44.json")
+
+result_final_xgb2 %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+  #          aes(y=hr_pred, color ="prediction old"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ .)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+
+
+EXTREM GUT - OVERFITTING
+
+```{r}
+result_final_xgb_test <- test_data %>%
+                  bind_cols(
+                    predict(final_xgb2, new_data = test_data) %>% rename("hr_pred" = ".pred")
+                  ) %>% mutate(set = "test")
+```
+
+```{r}
+
+rmse_files_xgb_test <- result_final_xgb_test %>% group_by(date,file_name) %>% rmse( hr,hr_pred) %>% arrange(desc(.estimate))
+
+rmse_files_xgb_test %>% 
+  ggplot()+
+  geom_histogram(aes(.estimate, fill = "test data"), binwidth =0.5, alpha =1/2)+
+geom_histogram(data = rmse_files_xgb,
+               aes(.estimate, fill = "all data"), binwidth =0.5, alpha =1/2)+
+  labs(x = "RMSE")+
+  theme_light()
+```
+
+```{r}
+
+
+files_test <- rmse_files_xgb_test$file_name[1:4]
+
+result_final_xgb_test %>% filter(file_name %in% files_test) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+  #          aes(y=hr_pred, color ="prediction old"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ date,ncol = 2, scales = "free")+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+
+## season
+rmse is not the right measure to compare season, because I don`t want to see the absolute value ...
+```{r}
+rmse_files_xgb %>% mutate(year = lubridate::year(date)) %>%
+  group_by(year) %>% summarise(rmse = mean(.estimate))
+```
+
+```{r}
+result_final_xgb2 %>% filter(str_detect(workout_code, "SST")) %>%
+  mutate(error = hr- hr_pred) %>%
+  group_by(file_name, date) %>% summarise(error = mean(error)) %>%
+  ggplot(aes(x= date))+
+  geom_point(aes(y=error))
+```
+
+```{r}
+check_files_low <- result_final_xgb2 %>%  mutate(error = hr- hr_pred) %>%
+  group_by(workout_code,file_name, date) %>% summarise(error = mean(error)) %>%
+                          filter(str_detect(workout_code, "SST") &
+                                   error < -5) 
+
+result_final_xgb2 %>% filter(file_name %in% check_files_low$file_name) %>%
+  ggplot(aes(x=minute))+
+  geom_line(aes(y=hr, color = "hr"))+
+  geom_line(aes(y=hr_pred, color ="prediction"))+
+  #geom_line(data = result_final_xgb %>% filter(file_name %in% files_test),
+  #          aes(y=hr_pred, color ="prediction old"))+
+  geom_line(aes(y=watt, color ="watt"), alpha =0.5)+
+  facet_wrap(workout_code ~ date)+
+  labs(title = "prediction of never seen  test data",
+       colour = "")
+```
+erstes interval
+2023-03-08: 35' 229W 150hf 
+2017-02-07: 40' 240W 155hf
+2017-01-04: 70' 240W 155hf --> extrem gut
+
+andere: 
+2017-01-04: 50' 229W 163hf
+
+wichtiger vergleich: 
+2017-01-17: 1h 229W 152hf shclechter als 2023-03-08 aber:
+ersten 35 minuten 228W 148hf --> etwas besser als 2023-03-08 
+--> MEtrik!!
+2017-03-10: 40' 248W 154hf -> viel besser! auch als 2017-02-07
+--> warum schletere metrik?
+
+
+
